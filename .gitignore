@@ -64,4 +64,12 @@ Thumbs.db
 
 # Temporary files
 tmp/
-temp/ 
+temp/
+
+# Large build files and caches
+*.pack
+*.pack.gz
+*.pack.old
+.next/
+dist/
+build/ 
