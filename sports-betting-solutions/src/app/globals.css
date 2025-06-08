@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme Variables */
+:root {
+  /* Light Theme (default) */
+  --foreground-rgb: 0, 0, 0;
+  --background-rgb: 246, 248, 250;
+  --card-background: 255, 255, 255;
+  --border-color: 229, 231, 235;
+  --primary-color: 37, 99, 235;
+  --secondary-color: 107, 114, 128;
+  --accent-color: 59, 130, 246;
+  --success-color: 16, 185, 129;
+  --warning-color: 245, 158, 11;
+  --error-color: 239, 68, 68;
+  --heading-color: 17, 24, 39;
+  --text-color: 55, 65, 81;
+  --muted-color: 156, 163, 175;
+}
+
+/* Dark Theme */
+.theme-dark {
+  --foreground-rgb: 255, 255, 255;
+  --background-rgb: 17, 24, 39;
+  --card-background: 31, 41, 55;
+  --border-color: 55, 65, 81;
+  --primary-color: 59, 130, 246;
+  --secondary-color: 156, 163, 175;
+  --accent-color: 96, 165, 250;
+  --success-color: 52, 211, 153;
+  --warning-color: 251, 191, 36;
+  --error-color: 248, 113, 113;
+  --heading-color: 243, 244, 246;
+  --text-color: 209, 213, 219;
+  --muted-color: 156, 163, 175;
+}
+
+/* Racing Theme */
+.theme-racing {
+  --foreground-rgb: 255, 255, 255;
+  --background-rgb: 49, 51, 56; /* Charcoal/tarmac gray */
+  --card-background: 45, 47, 52;
+  --border-color: 64, 66, 71;
+  --primary-color: 34, 197, 94; /* Racing green */
+  --secondary-color: 156, 163, 175;
+  --accent-color: 74, 222, 128;
+  --success-color: 22, 163, 74;
+  --warning-color: 251, 191, 36;
+  --error-color: 248, 113, 113;
+  --heading-color: 243, 244, 246;
+  --text-color: 209, 213, 219;
+  --muted-color: 156, 163, 175;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+}
+
+/* Themed Elements */
+.bg-card {
+  background-color: rgb(var(--card-background));
+  border-color: rgb(var(--border-color));
+}
+
+.heading-text {
+  color: rgb(var(--heading-color));
+}
+
+.body-text {
+  color: rgb(var(--text-color));
+}
+
+.muted-text {
+  color: rgb(var(--muted-color));
+}
+
+.border-themed {
+  border-color: rgb(var(--border-color));
+}
+
+/* Premium Card Styling */
+.premium-card {
+  background: linear-gradient(135deg, rgba(46, 206, 96, 0.1) 0%, rgba(26, 31, 44, 0.9) 100%);
+  border: 1px solid rgba(46, 206, 96, 0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+/* 3D Title Animation for Dark Mode */
+@keyframes textShadowPulse {
+  0% {
+    text-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
+  }
+  100% {
+    text-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+  }
+}
+
+.shadow-text-blue {
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.7);
+  animation: textShadowPulse 2s infinite;
+  font-family: 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', sans-serif;
+  letter-spacing: 0.05em;
+  transform: perspective(500px) rotateX(10deg);
+  display: inline-block;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.6s ease-out forwards;
+}
+
+/* Pulse animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Add smooth transitions between themes */
+html {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+/* Add any additional global styles here */ 

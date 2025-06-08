@@ -1,0 +1,41 @@
+name: Update Odds Tracking - NEW OPTIMIZED
+
+on:
+  schedule:
+    # AGGRESSIVE SCHEDULING to compensate for GitHub delays
+    # Runs every 2 minutes during racing hours to achieve ~10min actual intervals
+    # UK times converted to UTC (UK is GMT+0 winter, GMT+1 summer)
+    
+    # Racing hours: 07:00-23:00 UK time
+    - cron: '*/2 6-22 * * *'  # Every 2 minutes 06:00-22:59 UTC (07:00-23:59 UK summer - BST)
+    - cron: '*/2 7-23 * * *'  # Every 2 minutes 07:00-23:59 UTC (07:00-23:59 UK winter - GMT)
+    
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  update-odds-tracking-new:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run NEW OPTIMIZED odds tracking
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        TZ: Europe/London
+      run: npm run odds-tracking-new
+      
+    - name: Log completion
+      run: echo "NEW OPTIMIZED odds tracking completed at $(date)" 

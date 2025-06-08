@@ -1,0 +1,27 @@
+{
+  "name": "racecards-updater",
+  "version": "1.0.0",
+  "description": "Script to update Supabase with live racecards data",
+  "main": "update-supabase-racecards.js",
+  "scripts": {
+    "update": "node update-supabase-racecards.js",
+    "start": "node update-supabase-racecards.js",
+    "update-new": "node update-supabase-racecards-NEW.js",
+    "odds-tracking-new": "node update-odds-tracking-NEW.js",
+    "moving-average": "node moving-average-tracker.js",
+    "sharp-average-odds": "node sharp_average_odds.js",
+    "populate-master-results": "node populate-master-results.js",
+    "populate-master-results-update": "node populate-master-results.js --update"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8"
+  },
+  "keywords": [
+    "racing",
+    "api",
+    "supabase",
+    "betting"
+  ],
+  "author": "OddsVantage",
+  "license": "MIT"
+}

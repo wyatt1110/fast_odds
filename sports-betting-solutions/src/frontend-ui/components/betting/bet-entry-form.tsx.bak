@@ -1,0 +1,781 @@
+/**
+ * BET ENTRY FORM
+ * 
+ * This component handles the bet entry form for horse racing bets.
+ * It provides both automated horse matching and manual entry options.
+ * 
+ * Features:
+ * - Horse data lookup via the racing API
+ * - Manual entry mode for when horse data isn't available
+ * - Complete validation and error handling
+ * - Saves bet data to Supabase
+ * 
+ * Used by: The BettingDashboardPage component
+ */
+
+'use client';
+
+import { useState } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { matchHorse, ErrorType } from '@/lib/racing-api';
+import { Check, X, AlertCircle, Search, ChevronDown, ChevronUp } from 'lucide-react';
+
+interface BetEntryFormProps {
+  onClose: () => void;
+  userId: string;
+  onSave?: () => void;
+}
+
+// Define the table schema to match the database
+interface HorseRacingBet {
+  id?: string;
+  user_id: string;
+  track_name: string;
+  horse_name: string;
+  race_date: string;
+  bet_type: string;
+  stake: number;
+  odds: number;
+  status: string;
+  race_number?: number | null;
+  scheduled_race_time?: string | null;
+  each_way: boolean;
+  returns?: number | null;
+  profit_loss?: number | null;
+  model?: string | null;
+  jockey?: string | null;
+  trainer?: string | null;
+  race_location?: string | null;
+  class_type?: string | null;
+  distance?: string | null;
+  notes?: string | null;
+}
+
+// Interface for horse match result from the API
+interface HorseMatch {
+  horse: {
+    name: string;
+    jockey?: {
+      name: string;
+    };
+    trainer?: {
+      name: string;
+    };
+  };
+  racecard: {
+    course: string | { name: string };
+    date: string;
+    class?: string;
+    distance?: string;
+  };
+}
+
+export default function BetEntryForm({ onClose, userId, onSave }: BetEntryFormProps) {
+  // State for form fields
+  const [formData, setFormData] = useState({
+    horse_name: '',
+    track_name: '',
+    race_number: '',
+    race_date: new Date().toISOString().slice(0, 10), // Default to today
+    each_way: false,
+    stake: '',
+    odds: '',
+    model: '',
+  });
+
+  // State for API matching
+  const [isMatching, setIsMatching] = useState(false);
+  const [matchResult, setMatchResult] = useState<{
+    success: boolean;
+    horseName?: string;
+    jockey?: string;
+    trainer?: string;
+    courseDetails?: string;
+    raceClass?: string;
+    distance?: string;
+    message?: string;
+  } | null>(null);
+  
+  // State for saving bet
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  
+  // State for manual entry mode
+  const [manualEntryMode, setManualEntryMode] = useState(false);
+  const [showAdvancedFields, setShowAdvancedFields] = useState(false);
+  const [advancedFormData, setAdvancedFormData] = useState({
+    jockey: '',
+    trainer: '',
+    race_location: '',
+    class_type: '',
+    distance: '',
+    notes: '',
+  });
+
+  // Handle input changes for basic form
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    
+    if (type === 'checkbox') {
+      const target = e.target as HTMLInputElement;
+      setFormData(prev => ({
+        ...prev,
+        [name]: target.checked
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
+    
+    // Reset match result if any of the key fields change
+    if (['horse_name', 'track_name', 'race_date', 'race_number'].includes(name)) {
+      setMatchResult(null);
+    }
+  };
+  
+  // Handle input changes for advanced form
+  const handleAdvancedChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setAdvancedFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Handle horse matching with Racing API
+  const handleMatchHorse = async () => {
+    setError(null);
+    setIsMatching(true);
+    
+    try {
+      // Validate required fields
+      if (!formData.horse_name || !formData.track_name || !formData.race_date) {
+        throw new Error('Please provide horse name, track name, and race date to match the horse');
+      }
+      
+      // Call the Racing API
+      const result = await matchHorse(
+        formData.horse_name,
+        formData.track_name,
+        formData.race_date,
+        formData.race_number
+      ) as HorseMatch | null;
+      
+      if (result) {
+        const { horse, racecard } = result;
+        
+        // Populate advanced fields with data from API
+        setAdvancedFormData({
+          jockey: horse.jockey?.name || '',
+          trainer: horse.trainer?.name || '',
+          race_location: typeof racecard.course === 'string' ? racecard.course : racecard.course?.name || '',
+          class_type: racecard.class || '',
+          distance: racecard.distance || '',
+          notes: '',
+        });
+        
+        // Set match result success
+        setMatchResult({
+          success: true,
+          horseName: horse.name,
+          jockey: horse.jockey?.name || '',
+          trainer: horse.trainer?.name || '',
+          courseDetails: typeof racecard.course === 'string' 
+            ? `${racecard.course}, ${racecard.date}` 
+            : `${racecard.course?.name || 'Unknown'}, ${racecard.date}`,
+          raceClass: racecard.class || '',
+          distance: racecard.distance || '',
+        });
+      } else {
+        // Set match result failure
+        setMatchResult({
+          success: false,
+          message: 'No matching horse found. Please check the details and try again.',
+        });
+      }
+    } catch (err: any) {
+      console.error('Horse matching error:', err);
+      
+      // Check if this is a RacingApiError with an errorType
+      let errorMessage = 'Failed to match horse. Please try again.';
+      
+      if (err.errorType) {
+        // Provide specific error messages based on the error type
+        switch (err.errorType) {
+          case ErrorType.DATA_MISSING:
+            errorMessage = 'Missing data: Please fill in all required fields.';
+            break;
+          case ErrorType.NO_MATCH:
+            errorMessage = 'No matching horse found. Please verify the horse name, track, and date.';
+            break;
+          case ErrorType.API_CONNECTION:
+            errorMessage = 'Connection error: Could not connect to the racing data service.';
+            break;
+          case ErrorType.API_RESPONSE:
+            errorMessage = 'API error: Racing data service returned an error.';
+            break;
+          case ErrorType.SUPABASE:
+            errorMessage = 'Database error: Could not save the bet details.';
+            break;
+        }
+      } else {
+        // Use the error message if available
+        errorMessage = err.message || errorMessage;
+      }
+      
+      setError(errorMessage);
+      setMatchResult({
+        success: false,
+        message: errorMessage,
+      });
+    } finally {
+      setIsMatching(false);
+    }
+  };
+  
+  // Toggle manual entry mode
+  const handleToggleManualEntry = () => {
+    setManualEntryMode(prev => !prev);
+    // Reset match result when switching to manual mode
+    if (!manualEntryMode) {
+      setMatchResult(null);
+    }
+  };
+
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      // Check for valid horse match if not in manual mode
+      if (!manualEntryMode && !matchResult?.success) {
+        throw new Error('Please match the horse first or switch to manual entry mode');
+      }
+      
+      // Validate required fields
+      if (!formData.horse_name || !formData.track_name || !formData.stake || !formData.odds) {
+        throw new Error('Please fill out all required fields: Horse Name, Track, Stake, and Odds');
+      }
+      
+      // Parse and validate numeric fields
+      const stake = parseFloat(formData.stake);
+      if (isNaN(stake) || stake <= 0) {
+        throw new Error('Stake must be a positive number');
+      }
+      
+      // Handle odds which could be fractional (e.g., "6/4") or decimal
+      let odds = 0;
+      if (formData.odds.includes('/')) {
+        // Parse fractional odds (e.g., "6/4" becomes 2.5)
+        const [numerator, denominator] = formData.odds.split('/').map(Number);
+        if (isNaN(numerator) || isNaN(denominator) || denominator === 0) {
+          throw new Error('Invalid fractional odds format');
+        }
+        odds = (numerator / denominator) + 1;
+      } else {
+        odds = parseFloat(formData.odds);
+        if (isNaN(odds) || odds <= 0) {
+          throw new Error('Odds must be a positive number');
+        }
+      }
+      
+      // Calculate returns and profit/loss
+      const returns = stake * odds;
+      const profitLoss = returns - stake;
+      
+      // Prepare the bet data
+      const betData: HorseRacingBet = {
+        user_id: userId,
+        horse_name: formData.horse_name,
+        track_name: formData.track_name,
+        race_number: formData.race_number ? parseInt(formData.race_number) : null,
+        race_date: formData.race_date,
+        bet_type: formData.each_way ? 'each way' : 'win',
+        each_way: formData.each_way,
+        stake: stake,
+        odds: odds,
+        returns: returns,
+        profit_loss: profitLoss,
+        status: 'Pending', // Default status
+        model: formData.model || null,
+        scheduled_race_time: formData.race_number || null, // Use race number as time if provided
+      };
+      
+      // Add additional fields from the API match or manual input
+      if (manualEntryMode) {
+        // Use manually entered data
+        betData.jockey = advancedFormData.jockey || null;
+        betData.trainer = advancedFormData.trainer || null;
+        betData.race_location = advancedFormData.race_location || null;
+        betData.class_type = advancedFormData.class_type || null;
+        betData.distance = advancedFormData.distance || null;
+        betData.notes = advancedFormData.notes || null;
+      } else if (matchResult?.success) {
+        // Use data from successful API match
+        betData.jockey = matchResult.jockey || null;
+        betData.trainer = matchResult.trainer || null;
+        betData.race_location = formData.track_name;
+        betData.class_type = matchResult.raceClass || null;
+        betData.distance = matchResult.distance || null;
+      }
+      
+      // Insert the bet into the database using type assertion
+      const { data, error: insertError } = await supabase
+        .from('horse_racing_bets')
+        .insert(betData as any)
+        .select('*')
+        .single();
+      
+      if (insertError) {
+        console.error('Error saving bet:', insertError);
+        throw new Error(`Failed to save bet: ${insertError.message}`);
+      }
+      
+      // Show success message
+      setSuccess('Bet saved successfully!');
+      
+      // Reset form
+      setFormData({
+        horse_name: '',
+        track_name: '',
+        race_number: '',
+        race_date: new Date().toISOString().slice(0, 10),
+        each_way: false,
+        stake: '',
+        odds: '',
+        model: '',
+      });
+      
+      setAdvancedFormData({
+        jockey: '',
+        trainer: '',
+        race_location: '',
+        class_type: '',
+        distance: '',
+        notes: '',
+      });
+      
+      setMatchResult(null);
+      setManualEntryMode(false);
+      
+      // Call onSave callback if provided
+      if (onSave) {
+        onSave();
+      }
+
+      // Close the form after a delay
+      setTimeout(() => {
+        onClose();
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div 
+      className="fixed inset-0 flex items-start justify-center z-[1000] pt-8 pb-8 overflow-y-auto"
+      style={{ 
+        backgroundColor: 'rgba(0, 0, 0, 0.85)', 
+        backdropFilter: 'blur(12px)'
+      }}
+    >
+      <div 
+        className="w-[450px] max-w-[95vw] rounded-lg shadow-2xl bg-white"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header with title and close button */}
+        <div className="flex justify-between items-center px-4 py-3 bg-slate-800 rounded-t-lg border-b border-slate-700">
+          <h2 className="text-base font-bold text-white">Place Horse Racing Bet</h2>
+          <button
+            onClick={onClose}
+            className="bg-slate-700 hover:bg-red-600 text-white transition-colors p-1.5 rounded-md"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+          
+        {/* Content */}
+        <div className="p-4 bg-white">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Mode Selection */}
+            <div className="bg-slate-100 border border-slate-300 rounded-t-lg px-4 py-3 flex justify-between items-center">
+              <div className="font-medium flex items-center">
+                <span className={`inline-block w-2.5 h-2.5 rounded-full mr-2 ${manualEntryMode ? 'bg-amber-500' : 'bg-green-600'}`}></span>
+                <span className="text-slate-700 text-sm">{manualEntryMode ? 'Manual Entry Mode' : 'Auto-Match Mode'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleManualEntry}
+                className="text-blue-600 hover:text-blue-800 text-xs font-medium focus:outline-none focus:underline transition-colors"
+              >
+                {manualEntryMode ? 'Switch to Auto-Match' : 'Switch to Manual Entry'}
+              </button>
+            </div>
+            
+            {/* Alert Messages */}
+            {error && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-3 rounded-md">
+                <div className="flex items-start">
+                  <AlertCircle className="h-4 w-4 mr-2 mt-0.5 text-red-500" />
+                  <span className="text-red-700 text-sm font-medium">{error}</span>
+                </div>
+              </div>
+            )}
+            
+            {success && (
+              <div className="bg-green-50 border-l-4 border-green-500 p-3 rounded-md">
+                <div className="flex items-start">
+                  <Check className="h-4 w-4 mr-2 mt-0.5 text-green-500" />
+                  <span className="text-green-700 text-sm font-medium">{success}</span>
+                </div>
+              </div>
+            )}
+            
+            {/* Match Result */}
+            {matchResult && (
+              <div className={`${
+                matchResult.success 
+                  ? 'bg-green-50 border-green-500' 
+                  : 'bg-red-50 border-red-500'
+                } border-l-4 p-3 rounded-md`}
+              >
+                <div>
+                  <p className={`font-semibold text-base ${
+                    matchResult.success ? 'text-green-700' : 'text-red-700'
+                  }`}>
+                    {matchResult.success ? 'Horse Match Confirmed' : 'Horse Match Unsuccessful'}
+                  </p>
+                  {matchResult.success ? (
+                    <div className="mt-2 space-y-1.5 text-sm">
+                      <p><span className="font-medium">Horse:</span> {matchResult.horseName}</p>
+                      <p><span className="font-medium">Jockey:</span> {matchResult.jockey}</p>
+                      <p><span className="font-medium">Trainer:</span> {matchResult.trainer}</p>
+                      <p><span className="font-medium">Race:</span> {matchResult.courseDetails}</p>
+                      <p><span className="font-medium">Class:</span> {matchResult.raceClass}</p>
+                      <p><span className="font-medium">Distance:</span> {matchResult.distance}</p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-red-600 text-sm">{matchResult.message}</p>
+                  )}
+                </div>
+                {!matchResult.success && (
+                  <div className="mt-2">
+                    <button 
+                      type="button"
+                      onClick={handleToggleManualEntry}
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 px-2 py-0.5 rounded"
+                    >
+                      {manualEntryMode ? 'Exit Manual Entry' : 'Enter Details Manually'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            <div className="border-x border-slate-300">
+              {/* Horse Details Section */}
+              <div className="p-4 border-b border-slate-300">
+                <h3 className="text-slate-800 font-bold text-base mb-3">
+                  Horse Details
+                </h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="horse_name" className="block text-sm font-semibold text-slate-700 mb-1">Horse Name *</label>
+                    <input
+                      type="text"
+                      id="horse_name"
+                      name="horse_name"
+                      value={formData.horse_name}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="track_name" className="block text-sm font-semibold text-slate-700 mb-1">Track *</label>
+                    <input
+                      type="text"
+                      id="track_name"
+                      name="track_name"
+                      value={formData.track_name}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-5">
+                    <div>
+                      <label htmlFor="race_number" className="block text-sm font-semibold text-slate-700 mb-1">Race Number</label>
+                      <input
+                        type="text"
+                        id="race_number"
+                        name="race_number"
+                        value={formData.race_number}
+                        onChange={handleChange}
+                        placeholder="e.g. 3"
+                        className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="race_date" className="block text-sm font-semibold text-slate-700 mb-1">Date *</label>
+                      <input
+                        type="date"
+                        id="race_date"
+                        name="race_date"
+                        value={formData.race_date}
+                        onChange={handleChange}
+                        className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                        required
+                      />
+                    </div>
+                  </div>
+                  
+                  {!manualEntryMode && !matchResult?.success && (
+                    <button
+                      type="button"
+                      onClick={handleMatchHorse}
+                      disabled={isMatching}
+                      className="w-full mt-3 py-2.5 px-4 text-white font-semibold bg-blue-600 hover:bg-blue-700 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-blue-700"
+                    >
+                      {isMatching ? 'Verifying...' : 'Verify Horse Details'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {/* Bet Details Section */}
+              <div className="p-4 border-b border-slate-300">
+                <h3 className="text-slate-800 font-bold text-base mb-3">
+                  Bet Details
+                </h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <div className="bg-slate-100 p-3 rounded border-2 border-black">
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          id="each_way"
+                          name="each_way"
+                          checked={formData.each_way}
+                          onChange={handleChange}
+                          className="h-4 w-4 text-blue-600 border-slate-400 rounded focus:ring-blue-500"
+                        />
+                        <span className="ml-2 text-sm font-medium text-slate-800">
+                          Each Way (E/W)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-5">
+                    <div>
+                      <label htmlFor="stake" className="block text-sm font-semibold text-slate-700 mb-1">Stake *</label>
+                      <input
+                        type="text"
+                        id="stake"
+                        name="stake"
+                        value={formData.stake}
+                        onChange={handleChange}
+                        placeholder="e.g. 100"
+                        className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="odds" className="block text-sm font-semibold text-slate-700 mb-1">Odds *</label>
+                      <input
+                        type="text"
+                        id="odds"
+                        name="odds"
+                        value={formData.odds}
+                        onChange={handleChange}
+                        placeholder="e.g. 2.5 or 6/4"
+                        className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                        required
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="model" className="block text-sm font-semibold text-slate-700 mb-1">Model / Tipster</label>
+                    <input
+                      type="text"
+                      id="model"
+                      name="model"
+                      value={formData.model}
+                      onChange={handleChange}
+                      placeholder="Optional"
+                      className="w-full px-4 py-2 bg-slate-50 border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Advanced Fields Section */}
+              {(manualEntryMode || matchResult?.success) && (
+                <div className="p-4">
+                  <button 
+                    type="button"
+                    onClick={() => setShowAdvancedFields(!showAdvancedFields)}
+                    className="flex w-full justify-between items-center text-left text-slate-800 font-bold hover:text-blue-700 text-base mb-3"
+                  >
+                    <span>Racing Details {manualEntryMode ? "(Manual Entry)" : ""}</span>
+                    {showAdvancedFields ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  </button>
+                  
+                  {showAdvancedFields && (
+                    <div className="bg-slate-100 p-5 rounded-md border-2 border-black">
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-5">
+                          <div>
+                            <label htmlFor="jockey" className="block text-sm font-semibold text-slate-700 mb-1">Jockey</label>
+                            <input
+                              type="text"
+                              id="jockey"
+                              name="jockey"
+                              value={manualEntryMode ? advancedFormData.jockey : (matchResult?.jockey || '')}
+                              onChange={handleAdvancedChange}
+                              disabled={!manualEntryMode}
+                              className={`w-full px-4 py-2 border-2 border-black rounded ${
+                                !manualEntryMode 
+                                  ? 'bg-slate-200 text-slate-700 cursor-not-allowed' 
+                                  : 'bg-white text-slate-900 focus:ring-2 focus:ring-blue-500'
+                              } transition-colors`}
+                            />
+                          </div>
+                          
+                          <div>
+                            <label htmlFor="trainer" className="block text-sm font-semibold text-slate-700 mb-1">Trainer</label>
+                            <input
+                              type="text"
+                              id="trainer"
+                              name="trainer"
+                              value={manualEntryMode ? advancedFormData.trainer : (matchResult?.trainer || '')}
+                              onChange={handleAdvancedChange}
+                              disabled={!manualEntryMode}
+                              className={`w-full px-4 py-2 border-2 border-black rounded ${
+                                !manualEntryMode 
+                                  ? 'bg-slate-200 text-slate-700 cursor-not-allowed' 
+                                  : 'bg-white text-slate-900 focus:ring-2 focus:ring-blue-500'
+                              } transition-colors`}
+                            />
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label htmlFor="race_location" className="block text-sm font-semibold text-slate-700 mb-1">Race Location</label>
+                          <input
+                            type="text"
+                            id="race_location"
+                            name="race_location"
+                            value={manualEntryMode ? advancedFormData.race_location : formData.track_name}
+                            onChange={handleAdvancedChange}
+                            disabled={!manualEntryMode}
+                            className={`w-full px-4 py-2 border-2 border-black rounded ${
+                              !manualEntryMode 
+                                ? 'bg-slate-200 text-slate-700 cursor-not-allowed' 
+                                : 'bg-white text-slate-900 focus:ring-2 focus:ring-blue-500'
+                            } transition-colors`}
+                          />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-5">
+                          <div>
+                            <label htmlFor="class_type" className="block text-sm font-semibold text-slate-700 mb-1">Race Class</label>
+                            <input
+                              type="text"
+                              id="class_type"
+                              name="class_type"
+                              value={manualEntryMode ? advancedFormData.class_type : (matchResult?.raceClass || '')}
+                              onChange={handleAdvancedChange}
+                              disabled={!manualEntryMode}
+                              className={`w-full px-4 py-2 border-2 border-black rounded ${
+                                !manualEntryMode 
+                                  ? 'bg-slate-200 text-slate-700 cursor-not-allowed' 
+                                  : 'bg-white text-slate-900 focus:ring-2 focus:ring-blue-500'
+                              } transition-colors`}
+                            />
+                          </div>
+                          
+                          <div>
+                            <label htmlFor="distance" className="block text-sm font-semibold text-slate-700 mb-1">Race Distance</label>
+                            <input
+                              type="text"
+                              id="distance"
+                              name="distance"
+                              value={manualEntryMode ? advancedFormData.distance : (matchResult?.distance || '')}
+                              onChange={handleAdvancedChange}
+                              disabled={!manualEntryMode}
+                              className={`w-full px-4 py-2 border-2 border-black rounded ${
+                                !manualEntryMode 
+                                  ? 'bg-slate-200 text-slate-700 cursor-not-allowed' 
+                                  : 'bg-white text-slate-900 focus:ring-2 focus:ring-blue-500'
+                              } transition-colors`}
+                            />
+                          </div>
+                        </div>
+                        
+                        {manualEntryMode && (
+                          <div>
+                            <label htmlFor="notes" className="block text-sm font-semibold text-slate-700 mb-1">Notes</label>
+                            <textarea
+                              id="notes"
+                              name="notes"
+                              value={advancedFormData.notes}
+                              onChange={handleAdvancedChange}
+                              rows={3}
+                              placeholder="Any additional notes"
+                              className="w-full px-4 py-2 bg-white border-2 border-black rounded text-slate-900 focus:ring-2 focus:ring-blue-500 transition-colors"
+                            ></textarea>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            {/* Actions Footer */}
+            <div className="bg-slate-100 px-4 py-3 border border-slate-300 rounded-b-lg flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="min-w-[80px] px-4 py-2 text-white text-sm font-semibold bg-red-600 hover:bg-red-700 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 shadow-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isLoading || (!manualEntryMode && !matchResult?.success)}
+                className={`min-w-[100px] px-4 py-2 text-white text-sm font-semibold rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 shadow-sm ${
+                  !manualEntryMode && !matchResult?.success 
+                  ? 'bg-slate-400 cursor-not-allowed' 
+                  : 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
+                }`}
+              >
+                {isLoading ? 'Saving...' : 'Place Bet'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+} 
