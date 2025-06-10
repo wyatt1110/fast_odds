@@ -1,1 +1,1 @@
-web: uvicorn main:app --host 0.0.0.0 --port $PORT 
+web: node fast-api-betting-signals-detector.js 

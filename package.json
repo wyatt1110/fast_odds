@@ -1,26 +1,24 @@
 {
-  "name": "racecards-updater",
+  "name": "fast-odds-betting-signals",
   "version": "1.0.0",
-  "description": "Script to update Supabase with live racecards data",
-  "main": "update-supabase-racecards.js",
+  "description": "Fast API Betting Signals Detector for William Hill & Bet365",
+  "main": "fast-api-betting-signals-detector.js",
   "scripts": {
-    "update": "node update-supabase-racecards.js",
-    "start": "node update-supabase-racecards.js",
-    "update-new": "node update-supabase-racecards-NEW.js",
-    "odds-tracking-new": "node update-odds-tracking-NEW.js",
-    "moving-average": "node moving-average-tracker.js",
-    "sharp-average-odds": "node sharp_average_odds.js",
-    "populate-master-results": "node populate-master-results.js",
-    "populate-master-results-update": "node populate-master-results.js --update"
+    "start": "node fast-api-betting-signals-detector.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.8"
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [
-    "racing",
-    "api",
-    "supabase",
-    "betting"
+    "betting",
+    "odds",
+    "fast-api",
+    "signals",
+    "arbitrage"
   ],
   "author": "OddsVantage",
   "license": "MIT"
