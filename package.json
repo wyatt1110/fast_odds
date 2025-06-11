@@ -1,11 +1,11 @@
 {
-  "name": "fast-odds-betting-signals",
+  "name": "bet365-fast-odds-tracker",
   "version": "1.0.0",
-  "description": "Fast API Betting Signals Detector for William Hill & Bet365",
-  "main": "fast-api-betting-signals-detector.js",
+  "description": "Fast Bet365 odds tracker optimized for Railway deployment",
+  "main": "bet365-odds-updater.js",
   "scripts": {
-    "start": "node fast-api-betting-signals-detector.js",
-    "test": "node --test"
+    "start": "node bet365-odds-updater.js",
+    "dev": "node bet365-odds-updater.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0"
@@ -16,10 +16,14 @@
   "keywords": [
     "betting",
     "odds",
-    "fast-api",
-    "signals",
-    "arbitrage"
+    "api",
+    "horse-racing",
+    "bet365"
   ],
   "author": "OddsVantage",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wyatt1110/fast_odds.git"
+  }
 }
