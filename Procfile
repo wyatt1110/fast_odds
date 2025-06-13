@@ -1,1 +1,1 @@
-web: node fast-api-betting-signals-detector.js 
+worker: node fast-api-betting-signals-detector.js 

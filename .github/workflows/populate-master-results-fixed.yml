@@ -15,13 +15,13 @@ on:
   workflow_dispatch: # Allow manual triggering
     inputs:
       mode:
-        description: 'Run mode (update or insert-only)'
+        description: 'Run mode (insert or update)'
         required: false
-        default: 'update'
+        default: 'insert'
         type: choice
         options:
+        - insert
         - update
-        - insert-only
 
 jobs:
   populate-master-results:
@@ -48,22 +48,25 @@ jobs:
       id: mode
       run: |
         if [ "${{ github.event_name }}" = "schedule" ]; then
-          # All scheduled runs default to UPDATE mode (populate missing data)
-          echo "mode=update" >> $GITHUB_OUTPUT
-          echo "description=Scheduled run (UPDATE)" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.schedule }}" = "0 11 * * *" ] || [ "${{ github.event.schedule }}" = "0 12 * * *" ]; then
+            echo "mode=insert" >> $GITHUB_OUTPUT
+            echo "description=12:00 UK run (INSERT)" >> $GITHUB_OUTPUT
+          else
+            echo "mode=update" >> $GITHUB_OUTPUT
+            echo "description=20:00 UK run (UPDATE)" >> $GITHUB_OUTPUT
+          fi
         else
-          # Manual runs use the selected mode (default: update)
-          echo "mode=${{ github.event.inputs.mode || 'update' }}" >> $GITHUB_OUTPUT
-          echo "description=Manual run (${{ github.event.inputs.mode || 'update' }})" >> $GITHUB_OUTPUT
+          echo "mode=${{ github.event.inputs.mode || 'insert' }}" >> $GITHUB_OUTPUT
+          echo "description=Manual run (${{ github.event.inputs.mode || 'insert' }})" >> $GITHUB_OUTPUT
         fi
       
-    - name: Debug mode selection
-      run: |
-        echo "🔍 Mode detection results:"
-        echo "   Selected mode: ${{ steps.mode.outputs.mode }}"
-        echo "   Description: ${{ steps.mode.outputs.description }}"
-        echo "   Event name: ${{ github.event_name }}"
-        echo "   Current UTC time: $(date -u)"
+    - name: Run master results population script (INSERT)
+      if: steps.mode.outputs.mode == 'insert'
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        TZ: Europe/London
+      run: node populate-master-results.js
       
     - name: Run master results population script (UPDATE)
       if: steps.mode.outputs.mode == 'update'
@@ -71,19 +74,7 @@ jobs:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         TZ: Europe/London
-      run: |
-        echo "🔄 Running in UPDATE mode (default - updates existing records)"
-        node populate-master-results.js
-      
-    - name: Run master results population script (INSERT-ONLY)
-      if: steps.mode.outputs.mode == 'insert-only'
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        TZ: Europe/London
-      run: |
-        echo "🚀 Running in INSERT-ONLY mode (skips existing records)"
-        node populate-master-results.js --insert-only
+      run: node populate-master-results.js --update
       
     - name: Log completion
       run: |

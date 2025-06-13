@@ -1,11 +1,14 @@
 {
-  "name": "bet365-fast-odds-tracker",
+  "name": "fast-odds-tracker",
   "version": "1.0.0",
-  "description": "Fast Bet365 odds tracker optimized for Railway deployment",
+  "description": "Fast odds tracker for Bet365 and William Hill optimized for Railway deployment",
   "main": "bet365-odds-updater.js",
   "scripts": {
-    "start": "node bet365-odds-updater.js",
-    "dev": "node bet365-odds-updater.js"
+    "start": "node start-both.js",
+    "both": "node start-both.js",
+    "bet365": "node bet365-odds-updater.js",
+    "williamhill": "node williamhill-odds-updater.js",
+    "dev": "node start-both.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0"
@@ -18,7 +21,8 @@
     "odds",
     "api",
     "horse-racing",
-    "bet365"
+    "bet365",
+    "williamhill"
   ],
   "author": "OddsVantage",
   "license": "MIT",
