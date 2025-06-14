@@ -5,6 +5,16 @@ require('dotenv').config();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
 /**
+ * Get UK date (accounting for timezone)
+ */
+function getUKDate(daysOffset = 0) {
+    const now = new Date();
+    const ukTime = new Date(now.toLocaleString("en-US", {timeZone: "Europe/London"}));
+    ukTime.setDate(ukTime.getDate() + daysOffset);
+    return ukTime.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+}
+
+/**
  * Calculate returns and profit/loss based on result
  */
 function calculateReturnsAndProfitLoss(result, stake, odds) {
@@ -14,12 +24,12 @@ function calculateReturnsAndProfitLoss(result, stake, odds) {
     if (result === 'won') {
         const returns = stakeNum * oddsNum;
         const profit_loss = returns - stakeNum;
-        return { returns: returns.toFixed(2), profit_loss: profit_loss.toFixed(2) };
+        return { returns: parseFloat(returns.toFixed(2)), profit_loss: parseFloat(profit_loss.toFixed(2)) };
     } else if (result === 'void') {
-        return { returns: stakeNum.toFixed(2), profit_loss: '0.00' };
+        return { returns: parseFloat(stakeNum.toFixed(2)), profit_loss: 0.00 };
     } else {
         // Loss
-        return { returns: '0.00', profit_loss: (-stakeNum).toFixed(2) };
+        return { returns: 0.00, profit_loss: parseFloat((-stakeNum).toFixed(2)) };
     }
 }
 
@@ -53,18 +63,27 @@ function isHorseNonRunner(horseName, nonRunnersText) {
 }
 
 /**
- * Main function to update OV signals results
+ * Main function to update OV signals results - OPTIMIZED VERSION
  */
 async function updateOVSignalsResults() {
     try {
-        console.log('🚀 Starting OV Signals Results Update...');
+        console.log('🚀 Starting OPTIMIZED OV Signals Results Update...');
         
-        // Step 1: Get incomplete entries from ov_signals
-        console.log('📊 Fetching incomplete entries from ov_signals...');
+        // Calculate date range (last 3 calendar days including today)
+        const today = getUKDate(0);
+        const yesterday = getUKDate(-1);
+        const dayBefore = getUKDate(-2);
+        
+        console.log(`📅 Processing races from last 3 days: ${dayBefore}, ${yesterday}, ${today}`);
+        
+        // Step 1: Get incomplete entries from ov_signals for last 3 days only
+        console.log('📊 Fetching incomplete entries from ov_signals (last 3 days)...');
         const { data: incompleteEntries, error: fetchError } = await supabase
             .from('ov_signals')
             .select('*')
-            .or('result.eq.pending,bsp.is.null');
+            .or('result.eq.pending,result.is.null,bsp.is.null')
+            .in('race_date', [today, yesterday, dayBefore])
+            .order('race_date', { ascending: false });
         
         if (fetchError) {
             console.error('❌ Error fetching incomplete entries:', fetchError);
@@ -72,105 +91,162 @@ async function updateOVSignalsResults() {
         }
         
         if (!incompleteEntries || incompleteEntries.length === 0) {
-            console.log('✅ No incomplete entries found. All entries are up to date.');
+            console.log('✅ No incomplete entries found in the last 3 days. All entries are up to date.');
             return;
         }
         
         console.log(`📋 Found ${incompleteEntries.length} incomplete entries to process`);
         
-        let processed = 0;
-        let updated = 0;
-        let skipped = 0;
+        // Step 2: Group entries by unique horse_id + race_id combinations to avoid duplicate lookups
+        const uniqueHorseRaceCombos = new Map();
+        const entryGroups = new Map();
         
-        // Step 2: Process each incomplete entry
-        for (const entry of incompleteEntries) {
-            processed++;
-            console.log(`\n🔄 Processing entry ${processed}/${incompleteEntries.length}: ${entry.horse_name} (Race: ${entry.race_id})`);
+        incompleteEntries.forEach(entry => {
+            const key = `${entry.horse_id}_${entry.race_id}`;
             
-            try {
-                // Step 3: Find matching entry in master_results
-                const { data: masterResults, error: masterError } = await supabase
-                    .from('master_results')
-                    .select('*')
-                    .eq('horse_id', entry.horse_id)
-                    .eq('race_id', entry.race_id)
-                    .single();
-                
-                if (masterError || !masterResults) {
-                    console.log(`⚠️  No matching entry found in master_results for ${entry.horse_name}`);
-                    skipped++;
-                    continue;
-                }
-                
-                console.log(`✅ Found matching master_results entry for ${entry.horse_name}`);
-                
-                // Step 4: Determine if this is a void bet due to race abandonment
-                const isAbandoned = masterResults.is_abandoned === true;
-                
-                // Step 5: Check if horse is a non-runner
-                const isNonRunner = isHorseNonRunner(entry.horse_name, masterResults.non_runners);
-                
-                // Step 6: Determine result
-                const result = determineResult(masterResults.position, isAbandoned, isNonRunner);
-                
-                // Step 7: Calculate returns and profit/loss
-                const { returns, profit_loss } = calculateReturnsAndProfitLoss(result, entry.stake, entry.odds);
-                
-                // Step 8: Prepare update data
-                const updateData = {
-                    result: result,
-                    finish_position: masterResults.position,
-                    returns: parseFloat(returns),
-                    profit_loss: parseFloat(profit_loss)
-                };
-                
-                // Step 9: Add SP if available
-                if (masterResults.sp_dec !== null && masterResults.sp_dec !== undefined) {
-                    updateData.sp = masterResults.sp_dec;
-                }
-                
-                // Step 10: Add BSP if available
-                if (masterResults.bsp !== null && masterResults.bsp !== undefined) {
-                    updateData.bsp = masterResults.bsp;
-                }
-                
-                // Step 11: Update the entry
-                const { error: updateError } = await supabase
-                    .from('ov_signals')
-                    .update(updateData)
-                    .eq('id', entry.id);
-                
-                if (updateError) {
-                    console.error(`❌ Error updating entry ${entry.id}:`, updateError);
-                    continue;
-                }
-                
-                updated++;
-                console.log(`✅ Updated ${entry.horse_name}:`);
-                console.log(`   - Result: ${result}`);
-                console.log(`   - Position: ${masterResults.position}`);
-                console.log(`   - Returns: £${returns}`);
-                console.log(`   - Profit/Loss: £${profit_loss}`);
-                if (updateData.sp) console.log(`   - SP: ${updateData.sp}`);
-                if (updateData.bsp) console.log(`   - BSP: ${updateData.bsp}`);
-                if (isAbandoned) console.log(`   - Race was abandoned`);
-                if (isNonRunner) console.log(`   - Horse was a non-runner`);
-                
-            } catch (error) {
-                console.error(`❌ Error processing entry ${entry.id}:`, error);
-                continue;
+            if (!uniqueHorseRaceCombos.has(key)) {
+                uniqueHorseRaceCombos.set(key, {
+                    horse_id: entry.horse_id,
+                    race_id: entry.race_id,
+                    horse_name: entry.horse_name
+                });
+                entryGroups.set(key, []);
             }
+            
+            entryGroups.get(key).push(entry);
+        });
+        
+        console.log(`🔄 Grouped into ${uniqueHorseRaceCombos.size} unique horse-race combinations`);
+        console.log(`⚡ This will reduce database queries by ${incompleteEntries.length - uniqueHorseRaceCombos.size} calls!`);
+        
+        // Step 3: Fetch ALL master results for these unique combinations in one batch query
+        const horseRaceKeys = Array.from(uniqueHorseRaceCombos.values());
+        const horseIds = horseRaceKeys.map(combo => combo.horse_id);
+        const raceIds = horseRaceKeys.map(combo => combo.race_id);
+        
+        console.log('📊 Fetching master results in batch...');
+        const { data: masterResultsBatch, error: masterError } = await supabase
+            .from('master_results')
+            .select('*')
+            .in('horse_id', horseIds)
+            .in('race_id', raceIds);
+        
+        if (masterError) {
+            console.error('❌ Error fetching master results:', masterError);
+            return;
         }
         
-        // Step 12: Summary
-        console.log('\n📊 Update Summary:');
-        console.log(`   - Total processed: ${processed}`);
-        console.log(`   - Successfully updated: ${updated}`);
-        console.log(`   - Skipped (no master data): ${skipped}`);
-        console.log(`   - Errors: ${processed - updated - skipped}`);
+        console.log(`📋 Found ${masterResultsBatch.length} master results entries`);
         
-        if (updated > 0) {
-            console.log(`\n✅ Successfully updated ${updated} entries!`);
+        // Step 4: Create lookup map for master results
+        const masterResultsMap = new Map();
+        masterResultsBatch.forEach(result => {
+            const key = `${result.horse_id}_${result.race_id}`;
+            masterResultsMap.set(key, result);
+        });
+        
+        // Step 5: Process each unique horse-race combination and update all related entries
+        let totalProcessed = 0;
+        let totalUpdated = 0;
+        let totalSkipped = 0;
+        let batchUpdates = [];
+        
+        for (const [key, combo] of uniqueHorseRaceCombos) {
+            const masterResult = masterResultsMap.get(key);
+            const relatedEntries = entryGroups.get(key);
+            
+            if (!masterResult) {
+                console.log(`⚠️  No master result found for ${combo.horse_name} (${key})`);
+                totalSkipped += relatedEntries.length;
+                totalProcessed += relatedEntries.length;
+                continue;
+            }
+            
+            console.log(`\n✅ Processing ${combo.horse_name} - updating ${relatedEntries.length} related entries`);
+            
+            // Determine race outcome once for all related entries
+            const isAbandoned = masterResult.is_abandoned === true;
+            const isNonRunner = isHorseNonRunner(combo.horse_name, masterResult.non_runners);
+            const result = determineResult(masterResult.position, isAbandoned, isNonRunner);
+            
+            // Process each related entry (different bookmakers/odds for same horse)
+            for (const entry of relatedEntries) {
+                const { returns, profit_loss } = calculateReturnsAndProfitLoss(result, entry.stake, entry.odds);
+                
+                const updateData = {
+                    result: result,
+                    finish_position: masterResult.position,
+                    returns: returns,
+                    profit_loss: profit_loss
+                };
+                
+                // Add SP if available
+                if (masterResult.sp_dec !== null && masterResult.sp_dec !== undefined) {
+                    updateData.sp = masterResult.sp_dec;
+                }
+                
+                // Add BSP if available
+                if (masterResult.bsp !== null && masterResult.bsp !== undefined) {
+                    updateData.bsp = masterResult.bsp;
+                }
+                
+                // Add to batch update
+                batchUpdates.push({
+                    id: entry.id,
+                    updateData: updateData
+                });
+                
+                totalProcessed++;
+            }
+            
+            console.log(`   - Result: ${result}`);
+            console.log(`   - Position: ${masterResult.position}`);
+            if (masterResult.sp_dec) console.log(`   - SP: ${masterResult.sp_dec}`);
+            if (masterResult.bsp) console.log(`   - BSP: ${masterResult.bsp}`);
+            if (isAbandoned) console.log(`   - Race was abandoned`);
+            if (isNonRunner) console.log(`   - Horse was a non-runner`);
+        }
+        
+        // Step 6: Execute batch updates in chunks to avoid timeout
+        const BATCH_SIZE = 100;
+        console.log(`\n🔄 Executing ${batchUpdates.length} updates in batches of ${BATCH_SIZE}...`);
+        
+        for (let i = 0; i < batchUpdates.length; i += BATCH_SIZE) {
+            const batch = batchUpdates.slice(i, i + BATCH_SIZE);
+            console.log(`📦 Processing batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(batchUpdates.length/BATCH_SIZE)} (${batch.length} updates)`);
+            
+            // Execute updates in parallel for this batch
+            const updatePromises = batch.map(async ({ id, updateData }) => {
+                const { error } = await supabase
+                    .from('ov_signals')
+                    .update(updateData)
+                    .eq('id', id);
+                
+                if (error) {
+                    console.error(`❌ Error updating entry ${id}:`, error);
+                    return false;
+                }
+                return true;
+            });
+            
+            const results = await Promise.all(updatePromises);
+            const successCount = results.filter(success => success).length;
+            totalUpdated += successCount;
+            
+            console.log(`✅ Batch completed: ${successCount}/${batch.length} successful updates`);
+        }
+        
+        // Step 7: Summary
+        console.log('\n📊 OPTIMIZED Update Summary:');
+        console.log(`   - Total entries processed: ${totalProcessed}`);
+        console.log(`   - Successfully updated: ${totalUpdated}`);
+        console.log(`   - Skipped (no master data): ${totalSkipped}`);
+        console.log(`   - Errors: ${totalProcessed - totalUpdated - totalSkipped}`);
+        console.log(`   - Unique horse-race combinations: ${uniqueHorseRaceCombos.size}`);
+        console.log(`   - Database queries saved: ${incompleteEntries.length - uniqueHorseRaceCombos.size}`);
+        
+        if (totalUpdated > 0) {
+            console.log(`\n✅ Successfully updated ${totalUpdated} entries using optimized batch processing!`);
         } else {
             console.log('\n⚠️  No entries were updated.');
         }
@@ -182,6 +258,29 @@ async function updateOVSignalsResults() {
 }
 
 /**
+ * Refresh the ov_signals_results table by calling the database function
+ */
+async function refreshResultsTable() {
+    try {
+        console.log('🔄 Refreshing ov_signals_results table...');
+        
+        const { error } = await supabase.rpc('refresh_ov_signals_results_manual');
+        
+        if (error) {
+            console.error('❌ Error refreshing results table:', error);
+            return false;
+        }
+        
+        console.log('✅ Results table refreshed successfully!');
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Error in refreshResultsTable:', error);
+        return false;
+    }
+}
+
+/**
  * Entry point
  */
 async function main() {
@@ -189,7 +288,13 @@ async function main() {
     console.log(`🕐 Starting at: ${startTime.toISOString()}`);
     
     try {
+        // Step 1: Update individual bet results
         await updateOVSignalsResults();
+        
+        // Step 2: Refresh the aggregated results table
+        console.log('\n🔄 Refreshing aggregated results table...');
+        await refreshResultsTable();
+        
     } catch (error) {
         console.error('💥 Fatal error:', error);
         process.exit(1);
@@ -199,6 +304,7 @@ async function main() {
     const duration = (endTime - startTime) / 1000;
     console.log(`\n🕐 Completed at: ${endTime.toISOString()}`);
     console.log(`⏱️  Total duration: ${duration.toFixed(2)} seconds`);
+    console.log(`🚀 Performance improvement: Batch processing with date filtering!`);
 }
 
 // Run the script
@@ -206,4 +312,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = { updateOVSignalsResults }; 
+module.exports = { updateOVSignalsResults, refreshResultsTable }; 

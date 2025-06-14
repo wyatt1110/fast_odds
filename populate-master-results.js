@@ -26,65 +26,138 @@ const getYesterdayDate = () => {
   return yesterday.toISOString().split('T')[0];
 };
 
-// Make API request to get racing results
-const fetchRacingResults = (date) => {
-  return new Promise((resolve, reject) => {
-    const apiUrl = `https://api.theracingapi.com/v1/results?start_date=${date}&end_date=${date}`;
-    const auth = Buffer.from(`${USERNAME}:${PASSWORD}`).toString('base64');
+// Function to get a specific date for testing
+const getSpecificDate = (daysAgo) => {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return date.toISOString().split('T')[0];
+};
 
-    const options = {
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'User-Agent': 'Node.js/Results-Fetcher'
+// Make API request to get racing results with FULL PAGINATION
+const fetchRacingResults = async (date) => {
+  console.log(`🚨 ENTERING fetchRacingResults function for date: ${date}`);
+  
+  const auth = Buffer.from(`${USERNAME}:${PASSWORD}`).toString('base64');
+  const options = {
+    headers: {
+      'Authorization': `Basic ${auth}`,
+      'User-Agent': 'Node.js/Results-Fetcher'
+    }
+  };
+
+  let allRaces = [];
+  let skip = 0;
+  let limit = 50; // Maximum allowed by API
+  let totalExpected = 0;
+  let totalFetched = 0;
+  let requestCount = 0;
+
+  console.log(`🔍 Starting paginated fetch for ${date} using limit=${limit} and skip...`);
+
+  try {
+    // Keep fetching until we have all races
+    while (true) {
+      requestCount++;
+      const apiUrl = `https://api.theracingapi.com/v1/results?start_date=${date}&end_date=${date}&limit=${limit}&skip=${skip}`;
+      console.log(`📄 Request ${requestCount}: ${apiUrl}`);
+
+      const pageData = await new Promise((resolve, reject) => {
+        const req = https.get(apiUrl, options, (res) => {
+          console.log(`📡 Request ${requestCount} response status: ${res.statusCode}`);
+          
+          let data = '';
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+
+          res.on('end', () => {
+            try {
+              const jsonData = JSON.parse(data);
+              resolve(jsonData);
+            } catch (error) {
+              console.error(`❌ Error parsing request ${requestCount} response:`, error.message);
+              reject(error);
+            }
+          });
+        });
+
+        req.on('error', (error) => {
+          console.error(`❌ Error making API request ${requestCount}:`, error.message);
+          reject(error);
+        });
+
+        req.setTimeout(30000, () => {
+          console.error(`❌ Request timeout for request ${requestCount}`);
+          req.destroy();
+          reject(new Error(`Request timeout for request ${requestCount}`));
+        });
+      });
+
+      // Set total expected from first request
+      if (requestCount === 1) {
+        totalExpected = pageData.total || 0;
+        console.log(`🎯 TOTAL RACES EXPECTED: ${totalExpected}`);
+        
+        if (totalExpected === 0) {
+          console.log(`ℹ️  No races found for ${date}`);
+          break;
+        }
       }
+
+      // Add races from this request
+      const pageRaces = pageData.results || [];
+      allRaces = allRaces.concat(pageRaces);
+      totalFetched += pageRaces.length;
+
+      console.log(`📊 Request ${requestCount}: Got ${pageRaces.length} races (Total so far: ${totalFetched}/${totalExpected})`);
+
+      // Break if no more races on this request or we have all races
+      if (pageRaces.length === 0 || totalFetched >= totalExpected) {
+        console.log(`✅ Finished pagination. Got all ${totalFetched} races.`);
+        break;
+      }
+
+      // Update skip for next request
+      skip += limit;
+      
+      // Safety check to prevent infinite loops
+      if (requestCount > 10) {
+        console.warn(`⚠️  Safety break: Stopped at request ${requestCount} to prevent infinite loop`);
+        break;
+      }
+
+      // Small delay between requests to be respectful to the API
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // Final validation
+    if (totalFetched !== totalExpected && totalExpected > 0) {
+      console.warn(`⚠️  WARNING: Expected ${totalExpected} races but got ${totalFetched}`);
+    }
+
+    // Save complete response to file for debugging
+    const completeResponse = {
+      total: totalExpected,
+      fetched: totalFetched,
+      requests: requestCount,
+      results: allRaces
+    };
+    
+    require('fs').writeFileSync(`debug-response-${date}-COMPLETE.json`, JSON.stringify(completeResponse, null, 2));
+    console.log(`💾 Saved COMPLETE response to debug-response-${date}-COMPLETE.json`);
+    
+    console.log(`✅ Successfully fetched ALL results from API`);
+    console.log(`📊 FINAL RESULT: ${totalFetched} races fetched (expected: ${totalExpected})`);
+    
+    return {
+      total: totalExpected,
+      results: allRaces
     };
 
-    console.log(`🔍 Fetching results from API for ${date}...`);
-    console.log(`🌐 API URL: ${apiUrl}`);
-
-    const req = https.get(apiUrl, options, (res) => {
-      console.log(`📡 Response status: ${res.statusCode}`);
-      console.log(`📡 Response headers:`, res.headers);
-      
-      let data = '';
-
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      res.on('end', () => {
-        try {
-          console.log(`📊 Raw response size: ${data.length} characters`);
-          
-          // Save response to file for debugging
-          require('fs').writeFileSync(`debug-response-${date}.json`, data);
-          console.log(`💾 Saved response to debug-response-${date}.json`);
-          
-          const jsonData = JSON.parse(data);
-          console.log(`✅ Successfully fetched results from API`);
-          console.log(`📊 Response structure: total=${jsonData.total}, results=${jsonData.results?.length || 0}`);
-          console.log(`📅 Found ${jsonData.results?.length || 0} races for ${date}`);
-          resolve(jsonData);
-        } catch (error) {
-          console.error('❌ Error parsing API response:', error.message);
-          console.error('Raw response (first 500 chars):', data.substring(0, 500));
-          reject(error);
-        }
-      });
-
-    });
-
-    req.on('error', (error) => {
-      console.error('❌ Error making API request:', error.message);
-      reject(error);
-    });
-
-    req.setTimeout(30000, () => {
-      console.error('❌ Request timeout');
-      req.destroy();
-      reject(new Error('Request timeout'));
-    });
-  });
+  } catch (error) {
+    console.error('❌ Error in paginated fetch:', error.message);
+    throw error;
+  }
 };
 
 // Get runner data from supabase
@@ -664,14 +737,9 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     tote_tricast: race.tote_tricast,
     tote_trifecta: race.tote_trifecta,
     
-    // BSP Data (Betfair Starting Prices and Market Data)
+    // BSP Data (Betfair Starting Prices and Market Data) - Only columns that exist in DB
     betfair_event_id: bspData?.event_id || null,
     betfair_selection_id: bspData?.selection_id || null,
-    betfair_menu_hint: bspData?.menu_hint || null,
-    betfair_event_name: bspData?.event_name || null,
-    betfair_event_dt: bspData?.event_dt || null,
-    betfair_selection_name: bspData?.selection_name || null,
-    betfair_win_lose: bspData?.win_lose || null,
     bsp: bspData?.bsp || null,
     ppwap: bspData?.ppwap || null,
     morningwap: bspData?.morningwap || null,
@@ -679,9 +747,6 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     ppmin: bspData?.ppmin || null,
     ipmax: bspData?.ipmax || null,
     ipmin: bspData?.ipmin || null,
-    morningtradedvol: bspData?.morningtradedvol || null,
-    pptradedvol: bspData?.pptradedvol || null,
-    iptradedvol: bspData?.iptradedvol || null,
     total_traded_volume: bspData ? 
       (bspData.morningtradedvol || 0) + (bspData.pptradedvol || 0) + (bspData.iptradedvol || 0) : null,
     
@@ -850,6 +915,26 @@ const main = async () => {
     const targetDate = getYesterdayDate();
     console.log(`📅 Target date: ${targetDate}`);
     
+    // TEST: Check multiple dates to see pagination is working
+    console.log(`\n🧪 TESTING PAGINATION ON MULTIPLE DATES:`);
+    for (let i = 1; i <= 3; i++) {
+      const testDate = getSpecificDate(i);
+      try {
+        const testResults = await fetchRacingResults(testDate);
+        console.log(`📅 ${testDate}: ${testResults.results?.length || 0} races fetched (API total: ${testResults.total})`);
+        if (testResults.total > 25 && testResults.results?.length === testResults.total) {
+          console.log(`✅ PAGINATION WORKING: Got all ${testResults.total} races!`);
+        } else if (testResults.total > 25) {
+          console.log(`❌ PAGINATION ISSUE: Expected ${testResults.total} but got ${testResults.results?.length}`);
+        }
+      } catch (error) {
+        console.log(`📅 ${testDate}: Error - ${error.message}`);
+      }
+      // Small delay to avoid overwhelming the API
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    console.log(`🧪 END OF PAGINATION TEST\n`);
+    
     // Check command line arguments for update mode
     const isUpdate = process.argv.includes('--update');
     console.log(`🔄 Run mode: ${isUpdate ? 'UPDATE (always update existing records)' : 'INSERT (skip existing records)'}`);
@@ -866,6 +951,24 @@ const main = async () => {
       totalProperty: results.total,
       allKeys: Object.keys(results)
     });
+    
+    // ADDITIONAL DEBUG: Show race breakdown by region
+    if (results.results && results.results.length > 0) {
+      console.log(`\n📊 RACE BREAKDOWN BY REGION:`);
+      const regionCounts = {};
+      results.results.forEach(race => {
+        const region = race.region || 'Unknown';
+        regionCounts[region] = (regionCounts[region] || 0) + 1;
+      });
+      Object.entries(regionCounts).forEach(([region, count]) => {
+        console.log(`   ${region}: ${count} races`);
+      });
+      
+      console.log(`\n📋 FIRST 10 RACES:`);
+      results.results.slice(0, 10).forEach((race, i) => {
+        console.log(`${i+1}. ${race.race_name} at ${race.course} (${race.region}) - ${race.runners?.length || 0} runners`);
+      });
+    }
     
     if (!results.results || results.results.length === 0) {
       console.log('ℹ️  No results found for the target date');
