@@ -19,18 +19,11 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Get yesterday's date in YYYY-MM-DD format
+// Get yesterday's date in YYYY-MM-DD format - NEVER CHANGE THIS FOR GITHUB
 const getYesterdayDate = () => {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   return yesterday.toISOString().split('T')[0];
-};
-
-// Function to get a specific date for testing
-const getSpecificDate = (daysAgo) => {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().split('T')[0];
 };
 
 // Make API request to get racing results with FULL PAGINATION
@@ -835,7 +828,7 @@ const processResults = async (results, isUpdate = false) => {
           continue;
         }
         
-        console.log(`${exists ? '🔄' : '➕'} Processing ${runner.horse} (${runner.horse_id})...`);
+        console.log(`${exists ? '🔄 Updating' : '➕ Creating'} ${runner.horse} (${runner.horse_id})...`);
         
         // Get all the supplementary data
         const [runnerData, oddsData, bspData] = await Promise.all([
@@ -844,25 +837,13 @@ const processResults = async (results, isUpdate = false) => {
           getBspData(runner.horse, race.date, race.region)
         ]);
         
-        // Debug log the data we're getting
-        console.log(`📊 Data retrieved for ${runner.horse}:`, {
-          runnerData: !!runnerData,
-          oddsData: !!oddsData,
-          bspData: !!bspData,
-          runnerMovingAvg: runnerData?.["5_moving_average"] ? "✅" : "❌",
-          runnerBollinger: runnerData?.["5_bollinger_bands"] ? "✅" : "❌"
-        });
-        
-        // CRITICAL DEBUG: Check if BSP data has values
-        if (bspData) {
-          console.log(`🎯 BSP DATA FOUND for ${runner.horse}:`, {
-            bsp: bspData.bsp,
-            ppwap: bspData.ppwap,
-            morningwap: bspData.morningwap
-          });
-        } else {
-          console.log(`❌ NO BSP DATA found for ${runner.horse}`);
-        }
+        // Log data availability for key sources
+        const dataStatus = [
+          runnerData ? 'Runner✅' : 'Runner❌',
+          oddsData ? 'Odds✅' : 'Odds❌', 
+          bspData ? 'BSP✅' : 'BSP❌'
+        ].join(' ');
+        console.log(`📊 ${runner.horse}: ${dataStatus}`);
         
         // Build the master results row
         const resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
@@ -913,62 +894,16 @@ const main = async () => {
     console.log('🚀 Starting Master Results Population Script');
     
     const targetDate = getYesterdayDate();
-    console.log(`📅 Target date: ${targetDate}`);
+    console.log(`📅 Target date (yesterday): ${targetDate}`);
     
-    // TEST: Check multiple dates to see pagination is working
-    console.log(`\n🧪 TESTING PAGINATION ON MULTIPLE DATES:`);
-    for (let i = 1; i <= 3; i++) {
-      const testDate = getSpecificDate(i);
-      try {
-        const testResults = await fetchRacingResults(testDate);
-        console.log(`📅 ${testDate}: ${testResults.results?.length || 0} races fetched (API total: ${testResults.total})`);
-        if (testResults.total > 25 && testResults.results?.length === testResults.total) {
-          console.log(`✅ PAGINATION WORKING: Got all ${testResults.total} races!`);
-        } else if (testResults.total > 25) {
-          console.log(`❌ PAGINATION ISSUE: Expected ${testResults.total} but got ${testResults.results?.length}`);
-        }
-      } catch (error) {
-        console.log(`📅 ${testDate}: Error - ${error.message}`);
-      }
-      // Small delay to avoid overwhelming the API
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    console.log(`🧪 END OF PAGINATION TEST\n`);
-    
-    // Check command line arguments for update mode
-    const isUpdate = process.argv.includes('--update');
-    console.log(`🔄 Run mode: ${isUpdate ? 'UPDATE (always update existing records)' : 'INSERT (skip existing records)'}`);
-    if (isUpdate) {
-      console.log('🎯 This will update ALL existing records with latest data including new market analysis fields');
-    }
+    // Always run in UPDATE mode to ensure complete data
+    const isUpdate = true;
+    console.log(`🔄 Run mode: UPDATE (updating existing records with latest data)`)
     
     // Fetch results from API
     const results = await fetchRacingResults(targetDate);
     
-    console.log(`🔍 Debug - API response structure:`, {
-      hasResults: !!results.results,
-      resultsLength: results.results?.length,
-      totalProperty: results.total,
-      allKeys: Object.keys(results)
-    });
-    
-    // ADDITIONAL DEBUG: Show race breakdown by region
-    if (results.results && results.results.length > 0) {
-      console.log(`\n📊 RACE BREAKDOWN BY REGION:`);
-      const regionCounts = {};
-      results.results.forEach(race => {
-        const region = race.region || 'Unknown';
-        regionCounts[region] = (regionCounts[region] || 0) + 1;
-      });
-      Object.entries(regionCounts).forEach(([region, count]) => {
-        console.log(`   ${region}: ${count} races`);
-      });
-      
-      console.log(`\n📋 FIRST 10 RACES:`);
-      results.results.slice(0, 10).forEach((race, i) => {
-        console.log(`${i+1}. ${race.race_name} at ${race.course} (${race.region}) - ${race.runners?.length || 0} runners`);
-      });
-    }
+    console.log(`📊 API Response: ${results.results?.length || 0} races, ${results.total} total available`);
     
     if (!results.results || results.results.length === 0) {
       console.log('ℹ️  No results found for the target date');
