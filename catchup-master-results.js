@@ -13,10 +13,7 @@ console.log('🔄 CATCHUP MASTER RESULTS: Processing historical dates');
 
 // CATCHUP DATES - Edit these dates for historical data processing
 const CATCHUP_DATES = [
-  '2025-06-15',  // Add dates you need to process
-  '2025-06-14',
-  '2025-06-13'
-  // Add more dates as needed
+  '2025-06-15'  // Processing June 15th to complete the range
 ];
 
 // Enhanced API request with proper pagination and error handling
@@ -372,7 +369,7 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
   
   // Add all odds columns if available
   if (oddsData) {
-    // Opening odds
+    // Opening odds (only columns that exist in database)
     const openingColumns = [
       'bet365_opening', 'william_hill_opening', 'paddy_power_opening', 'sky_bet_opening',
       'ladbrokes_opening', 'coral_opening', 'betfair_opening', 'betfred_opening',
@@ -385,7 +382,7 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
       'talksport_bet_opening', 'betfair_exchange_opening'
     ];
     
-    // History columns
+    // History columns (only columns that exist in database)
     const historyColumns = [
       'bet365_history', 'william_hill_history', 'paddy_power_history', 'sky_bet_history',
       'ladbrokes_history', 'coral_history', 'betfair_history', 'betfred_history',
@@ -398,7 +395,7 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
       'talksport_bet_history', 'betfair_exchange_history'
     ];
     
-    // Place odds
+    // Place odds (only columns that exist in database)
     const placeColumns = [
       'bet365_places', 'william_hill_places', 'paddy_power_places', 'sky_bet_places',
       'ladbrokes_places', 'coral_places', 'betfair_places', 'betfred_places',
@@ -461,75 +458,234 @@ const insertMasterResult = async (resultRow, isUpdate = false) => {
   }
 };
 
-// Enhanced processing with parallel data fetching
+// CRITICAL FIX: ALWAYS INSERT philosophy - never skip a horse (CATCHUP VERSION)
 const processResults = async (results, isUpdate, targetDate) => {
-  let totalProcessed = 0, totalInserted = 0, totalUpdated = 0, totalErrors = 0, totalSkipped = 0;
+  let totalProcessed = 0;
+  let totalInserted = 0;
+  let totalUpdated = 0;
+  let totalErrors = 0;
+  let basicInsertions = 0; // Count horses inserted with basic data only
 
   console.log(`\n🔄 Processing ${results.results?.length || 0} races for ${targetDate}...`);
-  console.log(`📊 Expected total runners: ${results.totalRunners}`);
 
   for (const race of results.results || []) {
-    console.log(`\n📍 Processing race: ${race.race_name} at ${race.course} (${race.runners?.length || 0} runners)`);
-    
-    // Get race data once per race
-    const raceData = await getRaceData(race.race_id);
+    console.log(`\n📍 Processing race: ${race.race_name} at ${race.course} (${race.race_id})`);
     
     for (const runner of race.runners || []) {
       totalProcessed++;
       
+      console.log(`\n${totalProcessed}. Processing ${runner.horse} (${runner.horse_id})...`);
+      
       try {
+        // Check if record already exists
         const exists = await recordExists(race.race_id, runner.horse_id);
         
         if (exists && !isUpdate) {
-          console.log(`⏭️  Record exists for ${runner.horse}, skipping...`);
-          totalSkipped++;
+          console.log(`⏭️  Record already exists for ${runner.horse}, skipping...`);
           continue;
         }
         
-        console.log(`${exists ? '🔄 Updating' : '➕ Creating'} ${runner.horse}...`);
+        // ALWAYS INSERT PHILOSOPHY: Try comprehensive data first, fall back to basic if needed
+        let resultRow = null;
+        let insertionType = 'complete';
         
-        // Fetch all supplementary data in parallel
-        const [runnerData, oddsData, bspData] = await Promise.all([
-          getRunnerData(race.race_id, runner.horse_id),
-          getOddsData(race.race_id, runner.horse_id),
-          getBspData(runner.horse, race.date, race.region)
-        ]);
+        try {
+          // Attempt full data retrieval and processing
+          const raceData = await getRaceData(race.race_id);
+          const [runnerData, oddsData, bspData] = await Promise.all([
+            getRunnerData(race.race_id, runner.horse_id),
+            getOddsData(race.race_id, runner.horse_id),
+            getBspData(runner.horse, race.date, race.region)
+          ]);
+          
+          // Try to build complete row
+          resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
+          
+          const dataStatus = [
+            runnerData ? 'Runner✅' : 'Runner❌',
+            oddsData ? 'Odds✅' : 'Odds❌', 
+            bspData ? 'BSP✅' : 'BSP❌'
+          ].join(' ');
+          console.log(`📊 ${runner.horse}: ${dataStatus}`);
+          
+        } catch (complexError) {
+          console.warn(`⚠️  Complex data processing failed for ${runner.horse}: ${complexError.message}`);
+          console.log(`🔄 Falling back to BASIC insertion for ${runner.horse}...`);
+          
+          // FALLBACK: Create basic row with just API data
+          resultRow = createBasicMasterResultRow(race, runner);
+          insertionType = 'basic';
+          basicInsertions++;
+        }
         
-        const resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
+        // CRITICAL: If we still don't have a row, create minimal one
+        if (!resultRow) {
+          console.warn(`🚨 Creating MINIMAL row for ${runner.horse} to ensure insertion...`);
+          resultRow = createMinimalMasterResultRow(race, runner);
+          insertionType = 'minimal';
+          basicInsertions++;
+        }
+        
+        // Insert or update the record
         const shouldUpdate = exists && isUpdate;
         const success = await insertMasterResult(resultRow, shouldUpdate);
         
         if (success) {
           if (shouldUpdate) {
             totalUpdated++;
-            console.log(`✅ Updated ${runner.horse}`);
+            console.log(`✅ Updated ${runner.horse} (${insertionType} data)`);
           } else {
             totalInserted++;
-            console.log(`✅ Inserted ${runner.horse}`);
+            console.log(`✅ Inserted ${runner.horse} (${insertionType} data)`);
           }
         } else {
           totalErrors++;
+          console.error(`❌ FAILED to insert ${runner.horse} - this should not happen!`);
         }
-        
-        // Rate limiting between runners
-        await new Promise(resolve => setTimeout(resolve, 100));
         
       } catch (error) {
         totalErrors++;
         console.error(`❌ Error processing ${runner.horse}:`, error.message);
+        
+        // LAST RESORT: Try absolute minimal insertion
+        try {
+          console.log(`🆘 LAST RESORT: Attempting minimal insertion for ${runner.horse}...`);
+          const minimalRow = createMinimalMasterResultRow(race, runner);
+          const lastChance = await insertMasterResult(minimalRow, false);
+          if (lastChance) {
+            totalInserted++;
+            basicInsertions++;
+            console.log(`🆘 Successfully inserted ${runner.horse} with minimal data`);
+          }
+        } catch (lastError) {
+          console.error(`💥 Complete failure for ${runner.horse}: ${lastError.message}`);
+        }
       }
+      
+      // Small delay to avoid overwhelming the database
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
 
-  console.log(`\n📊 Processing Summary for ${targetDate}:`);
-  console.log(`   Processed: ${totalProcessed}`);
-  console.log(`   Inserted: ${totalInserted}`);
-  console.log(`   Updated: ${totalUpdated}`);
-  console.log(`   Skipped: ${totalSkipped}`);
+  console.log(`\n📊 FINAL PROCESSING SUMMARY for ${targetDate}:`);
+  console.log(`   Total processed: ${totalProcessed}`);
+  console.log(`   Successfully inserted: ${totalInserted}`);
+  console.log(`   Successfully updated: ${totalUpdated}`);
+  console.log(`   Basic/Minimal insertions: ${basicInsertions}`);
   console.log(`   Errors: ${totalErrors}`);
-  console.log(`   Success Rate: ${((totalInserted + totalUpdated) / totalProcessed * 100).toFixed(1)}%`);
   
-  return { totalProcessed, totalInserted, totalUpdated, totalErrors, totalSkipped };
+  return {
+    totalProcessed,
+    totalInserted,
+    totalUpdated,
+    totalErrors,
+    basicInsertions
+  };
+};
+
+// Create basic master results row with just API data and safe defaults
+const createBasicMasterResultRow = (race, runner) => {
+  return {
+    // Core identifiers - ALWAYS available from API
+    race_id: race.race_id,
+    horse_id: runner.horse_id,
+    horse: runner.horse,
+    
+    // Race information - always from API
+    course: race.course,
+    course_id: race.course_id,
+    race_date: race.date,
+    off_time: race.off,
+    off_dt: race.off_dt,
+    race_name: race.race_name,
+    dist: race.dist,
+    pattern: race.pattern,
+    race_class: race.class,
+    type: race.type,
+    age_band: race.age_band,
+    rating_band: race.rating_band,
+    sex_rest: race.sex_rest,
+    going: race.going,
+    surface: race.surface,
+    jumps: race.jumps,
+    region: race.region,
+    
+    // Runner information - always from API
+    number: runner.number,
+    draw: runner.draw,
+    age: runner.age,
+    sex: runner.sex,
+    sire: runner.sire,
+    sire_id: runner.sire_id,
+    dam: runner.dam,
+    dam_id: runner.dam_id,
+    damsire: runner.damsire,
+    damsire_id: runner.damsire_id,
+    trainer: runner.trainer,
+    trainer_id: runner.trainer_id,
+    jockey: runner.jockey,
+    jockey_id: runner.jockey_id,
+    jockey_claim_lbs: runner.jockey_claim_lbs,
+    owner: runner.owner,
+    owner_id: runner.owner_id,
+    weight_lbs: runner.weight_lbs,
+    headgear: runner.headgear,
+    rpr: runner.rpr,
+    
+    // Results - always from API
+    position: runner.position,
+    sp: runner.sp,
+    sp_dec: runner.sp_dec,
+    time: runner.time,
+    or_rating: runner.or,
+    rpr_result: runner.rpr,
+    tsr_result: runner.tsr,
+    prize_won: runner.prize,
+    comment_result: runner.comment,
+    
+    // Race results - from API
+    winning_time_detail: race.winning_time_detail,
+    race_comments: race.comments,
+    non_runners: race.non_runners,
+    tote_win: race.tote_win,
+    tote_place: race.tote_pl,
+    tote_exacta: race.tote_ex,
+    tote_csf: race.tote_csf,
+    tote_tricast: race.tote_tricast,
+    tote_trifecta: race.tote_trifecta,
+    
+    // All other fields as null - will be updated by subsequent runs
+    distance_f: null,
+    distance_round: null,
+    going_detailed: null,
+    prize: null,
+    field_size: null,
+    big_race: false,
+    is_abandoned: false,
+    runner_id: null,
+    dob: null,
+    comment: null,
+    
+    // Set all technical analysis fields to null
+    "5_moving_average": null,
+    "20_moving_average": null,
+    "60_moving_average": null,
+    // ... all other complex fields as null
+  };
+};
+
+// Create absolute minimal row for emergency insertions
+const createMinimalMasterResultRow = (race, runner) => {
+  return {
+    race_id: race.race_id,
+    horse_id: runner.horse_id,
+    horse: runner.horse,
+    course: race.course,
+    race_date: race.date,
+    position: runner.position,
+    sp: runner.sp,
+    sp_dec: runner.sp_dec
+  };
 };
 
 // Main function for catchup processing
