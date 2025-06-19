@@ -637,6 +637,10 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     prize_won: runner.prize,
     comment_result: runner.comment,
     
+    // Beaten Distance Data (from API: ovr_btn -> overall_beaten_distance_numeric, btn -> beaten_distance_numeric)
+    overall_beaten_distance_numeric: runner.ovr_btn ? parseFloat(runner.ovr_btn) : null,
+    beaten_distance_numeric: runner.btn ? parseFloat(runner.btn) : null,
+    
     // Race Result Details
     winning_time_detail: race.winning_time_detail,
     race_comments: race.comments,
