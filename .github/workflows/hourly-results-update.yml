@@ -1,9 +1,6 @@
 name: Hourly Bet Results Update
 
 on:
-  schedule:
-    # Run every hour from 13:00 to 23:00 UTC
-    - cron: '0 13-23 * * *'
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
