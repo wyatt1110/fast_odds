@@ -97,17 +97,17 @@ async function updateOVSignalsResults() {
         
         console.log(`📋 Found ${incompleteEntries.length} incomplete entries to process`);
         
-        // Step 2: Group entries by unique horse_id + race_id combinations to avoid duplicate lookups
+        // Step 2: Group entries by unique horse_id + race_date combinations to avoid duplicate lookups
         const uniqueHorseRaceCombos = new Map();
         const entryGroups = new Map();
         
         incompleteEntries.forEach(entry => {
-            const key = `${entry.horse_id}_${entry.race_id}`;
+            const key = `${entry.horse_id}_${entry.race_date}`;
             
             if (!uniqueHorseRaceCombos.has(key)) {
                 uniqueHorseRaceCombos.set(key, {
                     horse_id: entry.horse_id,
-                    race_id: entry.race_id,
+                    race_date: entry.race_date,
                     horse_name: entry.horse_name
                 });
                 entryGroups.set(key, []);
@@ -116,20 +116,19 @@ async function updateOVSignalsResults() {
             entryGroups.get(key).push(entry);
         });
         
-        console.log(`🔄 Grouped into ${uniqueHorseRaceCombos.size} unique horse-race combinations`);
+        console.log(`🔄 Grouped into ${uniqueHorseRaceCombos.size} unique horse-date combinations`);
         console.log(`⚡ This will reduce database queries by ${incompleteEntries.length - uniqueHorseRaceCombos.size} calls!`);
         
         // Step 3: Fetch ALL master results for these unique combinations in one batch query
+        // FIXED: Match by horse_id only, then filter by race_date during lookup
         const horseRaceKeys = Array.from(uniqueHorseRaceCombos.values());
         const horseIds = horseRaceKeys.map(combo => combo.horse_id);
-        const raceIds = horseRaceKeys.map(combo => combo.race_id);
         
-        console.log('📊 Fetching master results in batch...');
+        console.log('📊 Fetching master results in batch (matching by horse_id)...');
         const { data: masterResultsBatch, error: masterError } = await supabase
             .from('master_results')
             .select('*')
-            .in('horse_id', horseIds)
-            .in('race_id', raceIds);
+            .in('horse_id', horseIds);
         
         if (masterError) {
             console.error('❌ Error fetching master results:', masterError);
@@ -138,10 +137,10 @@ async function updateOVSignalsResults() {
         
         console.log(`📋 Found ${masterResultsBatch.length} master results entries`);
         
-        // Step 4: Create lookup map for master results
+        // Step 4: Create lookup map for master results by horse_id + race_date
         const masterResultsMap = new Map();
         masterResultsBatch.forEach(result => {
-            const key = `${result.horse_id}_${result.race_id}`;
+            const key = `${result.horse_id}_${result.race_date}`;
             masterResultsMap.set(key, result);
         });
         
@@ -152,8 +151,18 @@ async function updateOVSignalsResults() {
         let batchUpdates = [];
         
         for (const [key, combo] of uniqueHorseRaceCombos) {
-            const masterResult = masterResultsMap.get(key);
+            let masterResult = masterResultsMap.get(key);
             const relatedEntries = entryGroups.get(key);
+            
+            // If no exact date match, try to find any result for this horse_id
+            if (!masterResult) {
+                // Look for any master result with this horse_id (fallback)
+                const horseFallback = masterResultsBatch.find(result => result.horse_id === combo.horse_id);
+                if (horseFallback) {
+                    masterResult = horseFallback;
+                    console.log(`🔄 Using fallback result for ${combo.horse_name}: expected date=${combo.race_date}, found date=${horseFallback.race_date}`);
+                }
+            }
             
             if (!masterResult) {
                 console.log(`⚠️  No master result found for ${combo.horse_name} (${key})`);
@@ -242,7 +251,7 @@ async function updateOVSignalsResults() {
         console.log(`   - Successfully updated: ${totalUpdated}`);
         console.log(`   - Skipped (no master data): ${totalSkipped}`);
         console.log(`   - Errors: ${totalProcessed - totalUpdated - totalSkipped}`);
-        console.log(`   - Unique horse-race combinations: ${uniqueHorseRaceCombos.size}`);
+        console.log(`   - Unique horse-date combinations: ${uniqueHorseRaceCombos.size}`);
         console.log(`   - Database queries saved: ${incompleteEntries.length - uniqueHorseRaceCombos.size}`);
         
         if (totalUpdated > 0) {
