@@ -218,28 +218,54 @@ const getOddsData = async (raceId, horseId) => {
   }
 };
 
-// Get BSP data from fast_odds table using horse name matching
+// Get BSP data from UK_BSP_Historical or IRE_BSP_Historical tables
 const getBspData = async (horseName, raceDate, region) => {
   try {
+    // Map region to correct BSP table
+    let tableName;
+    if (region === 'IRE') {
+      tableName = 'IRE_BSP_Historical';  // Ireland BSP table
+    } else if (region === 'GBR' || region === 'UK' || !region) {
+      tableName = 'UK_BSP_Historical';   // UK BSP table (default)
+    } else {
+      // For other regions (USA, SAF, etc.) try UK table first as fallback
+      tableName = 'UK_BSP_Historical';
+    }
+    
     // Clean the horse name for matching
     const cleanHorseName = horseName
       .replace(/\s*\([^)]*\)/, '') // Remove country codes like (GB), (IRE)
       .trim();
 
-    // Convert race date to the format stored in fast_odds (likely ISO date)
-    const searchDate = new Date(raceDate).toISOString().split('T')[0];
-
-    const { data, error } = await supabase
-      .from('fast_odds')
+    // Convert date format from YYYY-MM-DD to DD-MM-YYYY for BSP table matching
+    // BSP table uses format like "02-01-2025 16:05"
+    const dateParts = raceDate.split('-'); // Split "2025-06-18"
+    const bspDateFormat = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`; // Convert to "18-06-2025"
+    
+    // Try multiple matching strategies for BSP data
+    let data = null;
+    let error = null;
+    
+    // Strategy 1: Exact horse name match with date (ignoring time component)
+    ({ data, error } = await supabase
+      .from(tableName)
       .select('*')
-      .ilike('horse_name', `%${cleanHorseName}%`)
-      .gte('created_at', `${searchDate}T00:00:00`)
-      .lte('created_at', `${searchDate}T23:59:59`)
-      .limit(1)
-      .single();
+      .eq('selection_name', horseName)
+      .ilike('event_dt', `${bspDateFormat}%`) // Match date part, ignore time
+      .single());
+    
+    // Strategy 2: If no exact match, try partial name match
+    if (!data && error?.code === 'PGRST116') {
+      ({ data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .ilike('selection_name', `%${cleanHorseName}%`)
+        .ilike('event_dt', `${bspDateFormat}%`) // Match date part, ignore time
+        .single());
+    }
 
     if (error && error.code !== 'PGRST116') {
-      // Don't log BSP misses as warnings - they're expected
+      // Don't log BSP misses as warnings - they're expected to be missing often
       return null;
     }
 
@@ -622,7 +648,7 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     tote_tricast: race.tote_tricast,
     tote_trifecta: race.tote_trifecta,
     
-    // BSP Data (Betfair Starting Prices and Market Data) - Only columns that exist in DB
+    // BSP Data (Betfair Starting Prices and Market Data) - From UK_BSP_Historical/IRE_BSP_Historical
     betfair_event_id: bspData?.event_id || null,
     betfair_selection_id: bspData?.selection_id || null,
     bsp: bspData?.bsp || null,
