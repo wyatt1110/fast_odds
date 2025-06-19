@@ -28,10 +28,40 @@ function isActiveHours() {
 }
 
 function isTrackMatch(apiTrack, dbTrack) {
-  // Flexible matching - if either track name contains the other, it's a match
-  const apiLower = apiTrack.toLowerCase();
-  const dbLower = dbTrack.toLowerCase();
-  return apiLower.includes(dbLower) || dbLower.includes(apiLower);
+  // Normalize both track names for flexible matching
+  const apiNormalized = apiTrack.toLowerCase().trim();
+  const dbNormalized = dbTrack.toLowerCase().trim();
+  
+  // Remove content in brackets from DB track name (e.g., "Chelmsford (AW)" becomes "Chelmsford")
+  const dbWithoutBrackets = dbNormalized.replace(/\s*\([^)]*\)\s*/g, '').trim();
+  
+  // Multiple matching strategies:
+  // 1. Exact match (after normalization)
+  if (apiNormalized === dbNormalized || apiNormalized === dbWithoutBrackets) {
+    return true;
+  }
+  
+  // 2. Either contains the other
+  if (apiNormalized.includes(dbNormalized) || dbNormalized.includes(apiNormalized)) {
+    return true;
+  }
+  
+  // 3. API track contains DB track without brackets, or vice versa
+  if (apiNormalized.includes(dbWithoutBrackets) || dbWithoutBrackets.includes(apiNormalized)) {
+    return true;
+  }
+  
+  // 4. Handle common variations (City suffix, etc.)
+  const apiWithoutCity = apiNormalized.replace(/\s*city\s*$/g, '').trim();
+  const dbWithoutCity = dbWithoutBrackets.replace(/\s*city\s*$/g, '').trim();
+  
+  if (apiWithoutCity === dbWithoutCity || 
+      apiWithoutCity.includes(dbWithoutCity) || 
+      dbWithoutCity.includes(apiWithoutCity)) {
+    return true;
+  }
+  
+  return false;
 }
 
 function normalizeHorseName(horseName) {
