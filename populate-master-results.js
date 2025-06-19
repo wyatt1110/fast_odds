@@ -662,7 +662,7 @@ const recordExists = async (raceId, horseId) => {
   }
 };
 
-// Insert or update master result with proper UPSERT
+// Insert or update master result with proper handling
 const insertMasterResult = async (resultRow, isUpdate = false) => {
   try {
     let result;
@@ -675,13 +675,31 @@ const insertMasterResult = async (resultRow, isUpdate = false) => {
         .eq('race_id', resultRow.race_id)
         .eq('horse_id', resultRow.horse_id);
     } else {
-      // Use proper UPSERT with ON CONFLICT
-      result = await supabase
+      // Check if record exists first, then insert or update
+      const { data: existingRecord, error: checkError } = await supabase
         .from('master_results')
-        .upsert([resultRow], {
-          onConflict: 'race_id,horse_id',
-          ignoreDuplicates: false
-        });
+        .select('id')
+        .eq('race_id', resultRow.race_id)
+        .eq('horse_id', resultRow.horse_id)
+        .single();
+      
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error(`❌ Error checking existing record:`, checkError.message);
+        return false;
+      }
+      
+      if (existingRecord) {
+        // Record exists, update it
+        result = await supabase
+          .from('master_results')
+          .update(resultRow)
+          .eq('id', existingRecord.id);
+      } else {
+        // Record doesn't exist, insert it
+        result = await supabase
+          .from('master_results')
+          .insert([resultRow]);
+      }
     }
 
     if (result.error) {
