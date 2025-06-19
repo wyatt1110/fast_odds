@@ -763,12 +763,37 @@ const processResults = async (results, isUpdate = false) => {
       console.log(`\n${totalProcessed}. Processing ${runner.horse} (${runner.horse_id})...`);
       
       try {
-        // Check if record already exists
+        // Check if record already exists and what data it has
         const exists = await recordExists(race.race_id, runner.horse_id);
+        let needsUpdate = false;
+        let existingRecord = null;
         
-        if (exists && !isUpdate) {
-          console.log(`⏭️  Record already exists for ${runner.horse}, skipping...`);
-          continue;
+        if (exists) {
+          // Check if existing record has BSP data
+          const { data: existing, error: fetchError } = await supabase
+            .from('master_results')
+            .select('bsp, horse')
+            .eq('race_id', race.race_id)
+            .eq('horse_id', runner.horse_id)
+            .single();
+          
+          if (fetchError) {
+            console.warn(`⚠️  Error fetching existing record for ${runner.horse}:`, fetchError.message);
+          } else {
+            existingRecord = existing;
+            // Check if BSP data is missing or null
+            const hasBspData = existing.bsp !== null;
+            
+            if (!hasBspData) {
+              console.log(`🔄 Record exists for ${runner.horse} but BSP data is missing, updating...`);
+              needsUpdate = true;
+            } else if (!isUpdate) {
+              console.log(`⏭️  Record already exists for ${runner.horse} with complete data, skipping...`);
+              continue;
+            } else {
+              needsUpdate = true; // Force update in update mode
+            }
+          }
         }
         
         // Fetch all supplementary data
@@ -807,7 +832,7 @@ const processResults = async (results, isUpdate = false) => {
         const resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
         
         // Insert/update the record
-        const success = await insertMasterResult(resultRow, exists && isUpdate);
+        const success = await insertMasterResult(resultRow, exists && (isUpdate || needsUpdate));
         
         if (success) {
           totalUpserted++;
