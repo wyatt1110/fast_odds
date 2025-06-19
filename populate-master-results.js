@@ -218,315 +218,225 @@ const getOddsData = async (raceId, horseId) => {
   }
 };
 
-// Get BSP data from UK or Ireland tables
+// Get BSP data from fast_odds table using horse name matching
 const getBspData = async (horseName, raceDate, region) => {
   try {
-    // Map region to correct table name based on actual database structure
-    let tableName;
-    if (region === 'IRE') {
-      tableName = 'IRE_BSP_Historical';  // Ireland BSP table
-    } else if (region === 'GBR' || region === 'UK' || !region) {
-      tableName = 'UK_BSP_Historical';   // UK BSP table
-    } else {
-      // For other regions (USA, SAF, etc.) try UK table first as fallback
-      tableName = 'UK_BSP_Historical';
-    }
-    
-    // Convert date format from YYYY-MM-DD to DD-MM-YYYY for BSP table matching
-    // BSP table uses format like "02-01-2025 16:05"
-    const dateParts = raceDate.split('-'); // Split "2025-06-07"
-    const bspDateFormat = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`; // Convert to "07-06-2025"
-    
-    console.log(`🔍 BSP lookup: ${tableName} for "${horseName}" on ${bspDateFormat}`);
-    
-    // Try multiple matching strategies for BSP data
-    let data = null;
-    let error = null;
-    
-    // Strategy 1: Exact horse name match with date (ignoring time component)
-    ({ data, error } = await supabase
-      .from(tableName)
+    // Clean the horse name for matching
+    const cleanHorseName = horseName
+      .replace(/\s*\([^)]*\)/, '') // Remove country codes like (GB), (IRE)
+      .trim();
+
+    // Convert race date to the format stored in fast_odds (likely ISO date)
+    const searchDate = new Date(raceDate).toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('fast_odds')
       .select('*')
-      .eq('selection_name', horseName)
-      .ilike('event_dt', `${bspDateFormat}%`) // Match date part, ignore time
-      .single());
-    
-    // Strategy 2: If no exact match, try partial name match
-    if (!data && error?.code === 'PGRST116') {
-      // Remove country codes and common suffixes for better matching
-      const cleanHorseName = horseName.replace(/\s*\([A-Z]{2,3}\)$/, '').trim();
-      console.log(`🔍 BSP fallback: searching for "${cleanHorseName}" on ${bspDateFormat}`);
-      
-      ({ data, error } = await supabase
-        .from(tableName)
-        .select('*')
-        .ilike('selection_name', `%${cleanHorseName}%`)
-        .ilike('event_dt', `${bspDateFormat}%`) // Match date part, ignore time
-        .single());
-    }
+      .ilike('horse_name', `%${cleanHorseName}%`)
+      .gte('created_at', `${searchDate}T00:00:00`)
+      .lte('created_at', `${searchDate}T23:59:59`)
+      .limit(1)
+      .single();
 
     if (error && error.code !== 'PGRST116') {
-      console.warn(`⚠️  Error fetching BSP data for ${horseName} on ${raceDate}:`, error.message);
+      // Don't log BSP misses as warnings - they're expected
       return null;
     }
 
     return data;
   } catch (error) {
-    console.warn(`⚠️  Exception fetching BSP data for ${horseName} on ${raceDate}:`, error.message);
+    // BSP data is often missing, don't log as error
     return null;
   }
 };
 
-// Advanced Market Analysis Functions
+// Calculate average opening odds from odds data
 const calculateAverageOpeningOdds = (oddsData) => {
   if (!oddsData) return null;
-  
-  const bookmakerFields = [
+
+  const openingOddsFields = [
     'bet365_opening', 'william_hill_opening', 'paddy_power_opening', 'sky_bet_opening',
     'ladbrokes_opening', 'coral_opening', 'betfair_opening', 'betfred_opening',
-    'unibet_opening', 'bet_uk_opening', 'bet_goodwin_opening', 'bet_victor_opening',
-    'ten_bet_opening', 'seven_bet_opening', 'bet442_opening', 'betmgm_opening',
-    'betway_opening', 'boyle_sports_opening', 'copybet_opening', 'dragon_bet_opening',
-    'gentlemen_jim_opening', 'grosvenor_sports_opening', 'hollywood_bets_opening',
-    'matchbook_opening', 'midnite_opening', 'pricedup_bet_opening', 'quinn_bet_opening',
-    'sporting_index_opening', 'spreadex_opening', 'star_sports_opening',
-    'virgin_bet_opening', 'talksport_bet_opening', 'betfair_exchange_opening'
+    'unibet_opening', 'bet_goodwin_opening', 'bet_victor_opening', 'ten_bet_opening',
+    'seven_bet_opening', 'bet442_opening', 'betmgm_opening', 'betway_opening',
+    'boyle_sports_opening', 'dragon_bet_opening', 'gentlemen_jim_opening',
+    'grosvenor_sports_opening', 'matchbook_opening', 'midnite_opening',
+    'pricedup_bet_opening', 'quinn_bet_opening', 'sporting_index_opening',
+    'spreadex_opening', 'star_sports_opening', 'virgin_bet_opening',
+    'talksport_bet_opening', 'betfair_exchange_opening'
   ];
-  
-  const validOdds = [];
-  bookmakerFields.forEach(field => {
-    const oddsValue = oddsData[field];
-    if (oddsValue && !isNaN(parseFloat(oddsValue))) {
-      validOdds.push(parseFloat(oddsValue));
-    }
-  });
-  
+
+  const validOdds = openingOddsFields
+    .map(field => oddsData[field])
+    .filter(odds => odds && !isNaN(parseFloat(odds)))
+    .map(odds => parseFloat(odds));
+
   if (validOdds.length === 0) return null;
-  
+
   const average = validOdds.reduce((sum, odds) => sum + odds, 0) / validOdds.length;
-  return Math.round(average * 100) / 100;
+  return average.toFixed(2);
 };
 
+// Parse average odds time series from history string
 const parseAverageOddsTimeSeries = (averageOddsString) => {
-  if (!averageOddsString || typeof averageOddsString !== 'string') return [];
+  if (!averageOddsString || averageOddsString.trim() === '') return [];
   
-  // Parse format: "4.45_08:15 / 4.50_08:20 / 4.42_08:25"
-  const entries = averageOddsString.split(' / ').map(entry => {
-    const [odds, time] = entry.split('_');
-    return {
-      odds: parseFloat(odds),
-      time: time,
-      timestamp: time // for sorting if needed
-    };
-  }).filter(entry => !isNaN(entry.odds));
-  
-  return entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-};
-
-const calculatePriceMovementMetrics = (averageOpeningOdds, averageOddsString) => {
-  if (!averageOpeningOdds || !averageOddsString) {
-    return {
-      direction: null,
-      magnitude: null
-    };
-  }
-  
-  const oddsEntries = parseAverageOddsTimeSeries(averageOddsString);
-  if (oddsEntries.length === 0) {
-    return {
-      direction: null,
-      magnitude: null
-    };
-  }
-  
-  const finalOdds = oddsEntries[oddsEntries.length - 1].odds;
-  const percentageChange = ((finalOdds - averageOpeningOdds) / averageOpeningOdds) * 100;
-  
-  let direction = 'Neutral';
-  let magnitude = Math.round(percentageChange * 100) / 100;
-  
-  if (Math.abs(percentageChange) >= 15) {
-    if (percentageChange < 0) {
-      direction = 'Positive'; // Odds got shorter (decreased)
-      magnitude = Math.abs(magnitude); // Make positive for shorter odds
-    } else {
-      direction = 'Negative'; // Odds got longer (increased)
-      magnitude = -magnitude; // Make negative for longer odds
-    }
-  }
-  
-  return {
-    direction,
-    magnitude: magnitude
-  };
-};
-
-const calculateMarketConfidenceScore = (averageOddsString) => {
-  if (!averageOddsString) return null;
-  
-  const oddsEntries = parseAverageOddsTimeSeries(averageOddsString);
-  if (oddsEntries.length < 3) return null; // Need minimum data points
-  
-  let trendConsistency = 0;
-  let directionChanges = 0;
-  const tolerance = 0.03; // 3% tolerance for "no change"
-  
-  for (let i = 1; i < oddsEntries.length; i++) {
-    const prevOdds = oddsEntries[i - 1].odds;
-    const currentOdds = oddsEntries[i].odds;
-    const change = (currentOdds - prevOdds) / prevOdds;
-    
-    // Skip if change is within tolerance
-    if (Math.abs(change) <= tolerance) continue;
-    
-    // Check if direction changed from previous significant movement
-    if (i > 1) {
-      const prevChange = (prevOdds - oddsEntries[i - 2].odds) / oddsEntries[i - 2].odds;
-      if (Math.abs(prevChange) > tolerance) {
-        if ((prevChange > 0 && change < 0) || (prevChange < 0 && change > 0)) {
-          directionChanges++;
-        } else {
-          trendConsistency++;
-        }
+  try {
+    // Parse time series data from comma-separated values or other format
+    const entries = averageOddsString.split(',').map(entry => {
+      const parts = entry.trim().split(':');
+      if (parts.length >= 2) {
+        return {
+          time: parts[0],
+          odds: parseFloat(parts[1])
+        };
       }
-    }
+      return null;
+    }).filter(entry => entry !== null);
+    
+    return entries;
+  } catch (error) {
+    return [];
   }
-  
-  const totalSignificantMoves = trendConsistency + directionChanges;
-  if (totalSignificantMoves === 0) return 3; // Neutral if no significant moves
-  
-  const consistencyRatio = trendConsistency / totalSignificantMoves;
-  
-  // Adjust for market volatility (more data points = more volatile)
-  const volatilityAdjustment = Math.min(1, oddsEntries.length / 50); // Max adjustment at 50+ data points
-  const adjustedConsistency = consistencyRatio * (1 + volatilityAdjustment * 0.2);
-  
-  // Map to 1-5 scale
-  if (adjustedConsistency >= 0.8) return 5; // Very confident/direct
-  if (adjustedConsistency >= 0.6) return 4; // Confident
-  if (adjustedConsistency >= 0.4) return 3; // Neutral
-  if (adjustedConsistency >= 0.2) return 2; // Low confidence
-  return 1; // Very low confidence/erratic
 };
 
-const calculateMoneyIndicators = (averageOpeningOdds, averageOddsString) => {
-  if (!averageOpeningOdds || !averageOddsString) {
+// Calculate price movement metrics
+const calculatePriceMovementMetrics = (averageOpeningOdds, averageOddsString) => {
+  const openingOdds = parseFloat(averageOpeningOdds);
+  const timeSeries = parseAverageOddsTimeSeries(averageOddsString);
+  
+  if (!openingOdds || timeSeries.length === 0) {
     return {
-      earlyMoney: false,
-      lateMoney: false
+      price_movement_direction: null,
+      price_movement_magnitude: null
     };
   }
   
-  const oddsEntries = parseAverageOddsTimeSeries(averageOddsString);
-  if (oddsEntries.length === 0) {
-    return {
-      earlyMoney: false,
-      lateMoney: false
-    };
-  }
+  const latestOdds = timeSeries[timeSeries.length - 1].odds;
+  const change = latestOdds - openingOdds;
+  const percentChange = ((change / openingOdds) * 100).toFixed(1);
   
-  const finalOdds = oddsEntries[oddsEntries.length - 1].odds;
-  const totalMovement = Math.abs((finalOdds - averageOpeningOdds) / averageOpeningOdds * 100);
-  
-  // Only analyze if movement is significant (>20%)
-  if (totalMovement < 20) {
-    return {
-      earlyMoney: false,
-      lateMoney: false
-    };
-  }
-  
-  // Find the 11:00 cutoff point or use first entry if no time data
-  let earlyMoveSize = 0;
-  let lateMoveSize = 0;
-  let cutoffIndex = 0;
-  
-  // Find 11:00 cutoff
-  for (let i = 0; i < oddsEntries.length; i++) {
-    const time = oddsEntries[i].time;
-    if (time && time >= '11:00') {
-      cutoffIndex = i;
-      break;
-    }
-  }
-  
-  // If no 11:00 found, use 60% of entries as cutoff
-  if (cutoffIndex === 0) {
-    cutoffIndex = Math.floor(oddsEntries.length * 0.6);
-  }
-  
-  // Calculate early movement (opening to 11:00)
-  if (cutoffIndex > 0) {
-    const elevenAmOdds = oddsEntries[cutoffIndex].odds;
-    earlyMoveSize = Math.abs((elevenAmOdds - averageOpeningOdds) / averageOpeningOdds * 100);
-  }
-  
-  // Calculate late movement (11:00 to close)
-  if (cutoffIndex < oddsEntries.length - 1) {
-    const elevenAmOdds = oddsEntries[cutoffIndex].odds;
-    lateMoveSize = Math.abs((finalOdds - elevenAmOdds) / elevenAmOdds * 100);
+  let direction = 'stable';
+  if (Math.abs(change) > 0.1) {
+    direction = change > 0 ? 'drifting' : 'shortening';
   }
   
   return {
-    earlyMoney: earlyMoveSize >= (totalMovement * 0.6),
-    lateMoney: lateMoveSize >= (totalMovement * 0.6)
+    price_movement_direction: direction,
+    price_movement_magnitude: `${percentChange}%`
   };
 };
 
-// Calculate derived fields
-const calculateDerivedFields = (runner, results, runnerData, oddsData) => {
-  const derived = {};
+// Calculate market confidence score
+const calculateMarketConfidenceScore = (averageOddsString) => {
+  const timeSeries = parseAverageOddsTimeSeries(averageOddsString);
   
-  // Win/place flags
-  derived.win_flag = runner.position === '1';
-  derived.place_flag = ['1', '2', '3'].includes(runner.position);
+  if (timeSeries.length < 3) return null;
   
-  // Favorite indicator
-  derived.favorite_indicator = runner.sp && runner.sp.includes('F') ? 'F' : null;
-  derived.joint_favorite_indicator = runner.sp && runner.sp.includes('JF');
+  // Calculate variance in odds to determine market confidence
+  const odds = timeSeries.map(entry => entry.odds);
+  const mean = odds.reduce((sum, odd) => sum + odd, 0) / odds.length;
+  const variance = odds.reduce((sum, odd) => sum + Math.pow(odd - mean, 2), 0) / odds.length;
+  const stdDev = Math.sqrt(variance);
   
-  // Extract opening price from comment
-  const comment = runner.comment || '';
-  const openingMatch = comment.match(/\(op ([^)]+)\)/);
-  derived.opening_price_mentioned = openingMatch ? openingMatch[1] : null;
+  // Lower standard deviation indicates higher confidence
+  const confidenceScore = Math.max(0, 100 - (stdDev / mean * 100)).toFixed(1);
   
-  const touchedMatch = comment.match(/tchd ([^)]+)/);
-  derived.price_touched_mentioned = touchedMatch ? touchedMatch[1] : null;
+  let confidenceLevel = 'low';
+  if (confidenceScore > 80) confidenceLevel = 'high';
+  else if (confidenceScore > 60) confidenceLevel = 'medium';
   
-  // Convert beaten lengths to numeric
-  derived.beaten_distance_numeric = runner.btn && runner.btn !== '0' ? parseFloat(runner.btn) : 0;
-  derived.overall_beaten_distance_numeric = runner.ovr_btn && runner.ovr_btn !== '0' ? parseFloat(runner.ovr_btn) : 0;
-  
-  // NEW ADVANCED MARKET ANALYSIS FIELDS
-  
-  // 1. Average opening odds
-  derived.average_opening_odds = calculateAverageOpeningOdds(oddsData);
-  
-  // 2 & 3. Price movement direction and magnitude
-  const priceMovement = calculatePriceMovementMetrics(
-    derived.average_opening_odds, 
-    runnerData?.average_odds
-  );
-  derived.price_movement_direction = priceMovement.direction;
-  derived.price_movement_magnitude = priceMovement.magnitude;
-  
-  // 4. Market confidence score
-  derived.market_confidence_score = calculateMarketConfidenceScore(runnerData?.average_odds);
-  
-  // 5 & 6. Early and late money indicators
-  const moneyIndicators = calculateMoneyIndicators(
-    derived.average_opening_odds,
-    runnerData?.average_odds
-  );
-  derived.early_money_indicator = moneyIndicators.earlyMoney;
-  derived.late_money_indicator = moneyIndicators.lateMoney;
-  
-
-  
-  return derived;
+  return `${confidenceLevel} (${confidenceScore}%)`;
 };
 
-// Build master results row
+// Calculate early and late money indicators
+const calculateMoneyIndicators = (averageOpeningOdds, averageOddsString) => {
+  const timeSeries = parseAverageOddsTimeSeries(averageOddsString);
+  const openingOdds = parseFloat(averageOpeningOdds);
+  
+  if (!openingOdds || timeSeries.length < 3) {
+    return {
+      early_money_indicator: null,
+      late_money_indicator: null
+    };
+  }
+  
+  // Split time series into early (first third) and late (last third) periods
+  const thirdPoint = Math.floor(timeSeries.length / 3);
+  const twoThirdsPoint = Math.floor(timeSeries.length * 2 / 3);
+  
+  const earlyPeriod = timeSeries.slice(0, thirdPoint);
+  const latePeriod = timeSeries.slice(twoThirdsPoint);
+  
+  if (earlyPeriod.length === 0 || latePeriod.length === 0) {
+    return {
+      early_money_indicator: null,
+      late_money_indicator: null
+    };
+  }
+  
+  // Calculate average odds for each period
+  const earlyAverage = earlyPeriod.reduce((sum, entry) => sum + entry.odds, 0) / earlyPeriod.length;
+  const lateAverage = latePeriod.reduce((sum, entry) => sum + entry.odds, 0) / latePeriod.length;
+  
+  // Determine money indicators based on movement
+  const earlyChange = ((earlyAverage - openingOdds) / openingOdds * 100).toFixed(1);
+  const lateChange = ((lateAverage - earlyAverage) / earlyAverage * 100).toFixed(1);
+  
+  let earlyIndicator = 'neutral';
+  if (Math.abs(earlyChange) > 5) {
+    earlyIndicator = earlyChange > 0 ? 'drifting' : 'backed';
+  }
+  
+  let lateIndicator = 'neutral';
+  if (Math.abs(lateChange) > 5) {
+    lateIndicator = lateChange > 0 ? 'drifting' : 'backed';
+  }
+  
+  return {
+    early_money_indicator: `${earlyIndicator} (${earlyChange}%)`,
+    late_money_indicator: `${lateIndicator} (${lateChange}%)`
+  };
+};
+
+// Calculate derived fields for machine learning
+const calculateDerivedFields = (runner, results, runnerData, oddsData) => {
+  // Calculate average opening odds
+  const averageOpeningOdds = calculateAverageOpeningOdds(oddsData);
+  
+  // Get average odds time series from runner data if available
+  const averageOddsString = runnerData?.average_odds || '';
+  
+  // Calculate price movement metrics
+  const priceMovement = calculatePriceMovementMetrics(averageOpeningOdds, averageOddsString);
+  
+  // Calculate market confidence
+  const marketConfidence = calculateMarketConfidenceScore(averageOddsString);
+  
+  // Calculate money indicators
+  const moneyIndicators = calculateMoneyIndicators(averageOpeningOdds, averageOddsString);
+  
+  // Calculate result flags
+  const position = parseInt(runner.position);
+  const winFlag = position === 1;
+  const placeFlag = position <= 3; // Assuming place pays to 3rd
+  
+  // Determine if favorite (lowest odds)
+  const sp = parseFloat(runner.sp_dec || runner.sp);
+  const favoriteFlag = sp && sp <= 3.0; // Rough favorite threshold
+  
+  return {
+    average_opening_odds: averageOpeningOdds,
+    win_flag: winFlag,
+    place_flag: placeFlag,
+    favorite_flag: favoriteFlag,
+    ...priceMovement,
+    market_confidence_score: marketConfidence,
+    ...moneyIndicators
+  };
+};
+
+// Build complete master results row with all available data
 const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData) => {
   const derivedFields = calculateDerivedFields(runner, race, runnerData, oddsData);
   
@@ -582,6 +492,7 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     owner_id: runner.owner_id,
     weight_lbs: runner.weight_lbs,
     headgear: runner.headgear,
+    rpr: runner.rpr,
     comment: runnerData?.comment || null,
     
     // Technical Analysis (from runners table)
@@ -740,18 +651,18 @@ const recordExists = async (raceId, horseId) => {
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      console.warn(`⚠️  Error checking existing record for ${horseId} in race ${raceId}:`, error.message);
+      console.warn(`⚠️  Error checking if record exists for ${horseId} in race ${raceId}:`, error.message);
       return false;
     }
 
-    return !!data;
+    return data !== null;
   } catch (error) {
-    console.warn(`⚠️  Exception checking existing record for ${horseId} in race ${raceId}:`, error.message);
+    console.warn(`⚠️  Exception checking if record exists for ${horseId} in race ${raceId}:`, error.message);
     return false;
   }
 };
 
-// Insert or update master results record
+// Insert or update master result with proper UPSERT
 const insertMasterResult = async (resultRow, isUpdate = false) => {
   try {
     let result;
@@ -764,31 +675,38 @@ const insertMasterResult = async (resultRow, isUpdate = false) => {
         .eq('race_id', resultRow.race_id)
         .eq('horse_id', resultRow.horse_id);
     } else {
-      // Insert new record
+      // Use proper UPSERT with ON CONFLICT
       result = await supabase
         .from('master_results')
-        .insert([resultRow]);
+        .upsert([resultRow], {
+          onConflict: 'race_id,horse_id',
+          ignoreDuplicates: false
+        });
     }
 
     if (result.error) {
-      console.error(`❌ Error ${isUpdate ? 'updating' : 'inserting'} record for ${resultRow.horse} in race ${resultRow.race_id}:`, result.error.message);
+      console.error(`❌ Error ${isUpdate ? 'updating' : 'upserting'} record for ${resultRow.horse}:`, result.error.message);
       return false;
     }
 
     return true;
   } catch (error) {
-    console.error(`❌ Exception ${isUpdate ? 'updating' : 'inserting'} record for ${resultRow.horse} in race ${resultRow.race_id}:`, error.message);
+    console.error(`❌ Exception ${isUpdate ? 'updating' : 'upserting'} record for ${resultRow.horse}:`, error.message);
     return false;
   }
 };
 
-// CRITICAL FIX: ALWAYS INSERT philosophy - never skip a horse
+// ENHANCED: Process results with comprehensive logging and fallback strategy
 const processResults = async (results, isUpdate = false) => {
   let totalProcessed = 0;
-  let totalInserted = 0;
-  let totalUpdated = 0;
+  let totalUpserted = 0;
   let totalErrors = 0;
-  let basicInsertions = 0; // Count horses inserted with basic data only
+  let missingDataCounts = {
+    race_data: 0,
+    runner_data: 0,
+    odds_data: 0,
+    bsp_data: 0
+  };
 
   console.log(`\n🔄 Processing ${results.results?.length || 0} races...`);
 
@@ -809,81 +727,56 @@ const processResults = async (results, isUpdate = false) => {
           continue;
         }
         
-        // ALWAYS INSERT PHILOSOPHY: Try comprehensive data first, fall back to basic if needed
-        let resultRow = null;
-        let insertionType = 'complete';
+        // Fetch all supplementary data
+        const [raceData, runnerData, oddsData, bspData] = await Promise.all([
+          getRaceData(race.race_id),
+          getRunnerData(race.race_id, runner.horse_id),
+          getOddsData(race.race_id, runner.horse_id),
+          getBspData(runner.horse, race.date, race.region)
+        ]);
         
-        try {
-          // Attempt full data retrieval and processing
-          const raceData = await getRaceData(race.race_id);
-          const [runnerData, oddsData, bspData] = await Promise.all([
-            getRunnerData(race.race_id, runner.horse_id),
-            getOddsData(race.race_id, runner.horse_id),
-            getBspData(runner.horse, race.date, race.region)
-          ]);
-          
-          // Try to build complete row
-          resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
-          
-          const dataStatus = [
-            runnerData ? 'Runner✅' : 'Runner❌',
-            oddsData ? 'Odds✅' : 'Odds❌', 
-            bspData ? 'BSP✅' : 'BSP❌'
-          ].join(' ');
-          console.log(`📊 ${runner.horse}: ${dataStatus}`);
-          
-        } catch (complexError) {
-          console.warn(`⚠️  Complex data processing failed for ${runner.horse}: ${complexError.message}`);
-          console.log(`🔄 Falling back to BASIC insertion for ${runner.horse}...`);
-          
-          // FALLBACK: Create basic row with just API data
-          resultRow = createBasicMasterResultRow(race, runner);
-          insertionType = 'basic';
-          basicInsertions++;
+        // Log data availability with matching format from error logs
+        const dataAvailable = [];
+        const dataMissing = [];
+        
+        if (raceData) dataAvailable.push('race_data');
+        else { dataMissing.push('race_data'); missingDataCounts.race_data++; }
+        
+        if (runnerData) dataAvailable.push('runner_data');
+        else { dataMissing.push('runner_data'); missingDataCounts.runner_data++; }
+        
+        if (oddsData) dataAvailable.push('odds_data');
+        else { dataMissing.push('odds_data'); missingDataCounts.odds_data++; }
+        
+        if (bspData) dataAvailable.push('bsp_data');
+        else { dataMissing.push('bsp_data'); missingDataCounts.bsp_data++; }
+        
+        console.log(`📊 ${runner.horse}:`);
+        if (dataAvailable.length > 0) {
+          console.log(`   ✅ Found: ${dataAvailable.join(', ')}`);
+        }
+        if (dataMissing.length > 0) {
+          console.log(`   ❌ Missing: ${dataMissing.join(', ')}`);
         }
         
-        // CRITICAL: If we still don't have a row, create minimal one
-        if (!resultRow) {
-          console.warn(`🚨 Creating MINIMAL row for ${runner.horse} to ensure insertion...`);
-          resultRow = createMinimalMasterResultRow(race, runner);
-          insertionType = 'minimal';
-          basicInsertions++;
-        }
+        // Build master results row with available data
+        const resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
         
-        // Insert or update the record
-        const shouldUpdate = exists && isUpdate;
-        const success = await insertMasterResult(resultRow, shouldUpdate);
+        // Insert/update the record
+        const success = await insertMasterResult(resultRow, exists && isUpdate);
         
         if (success) {
-          if (shouldUpdate) {
-            totalUpdated++;
-            console.log(`✅ Updated ${runner.horse} (${insertionType} data)`);
-          } else {
-            totalInserted++;
-            console.log(`✅ Inserted ${runner.horse} (${insertionType} data)`);
-          }
+          totalUpserted++;
+          console.log(`✅ Successfully upserted ${runner.horse}`);
         } else {
           totalErrors++;
-          console.error(`❌ FAILED to insert ${runner.horse} - this should not happen!`);
+          console.error(`❌ FAILED to upsert ${runner.horse}`);
         }
         
       } catch (error) {
         totalErrors++;
-        console.error(`❌ Error processing ${runner.horse}:`, error.message);
-        
-        // LAST RESORT: Try absolute minimal insertion
-        try {
-          console.log(`🆘 LAST RESORT: Attempting minimal insertion for ${runner.horse}...`);
-          const minimalRow = createMinimalMasterResultRow(race, runner);
-          const lastChance = await insertMasterResult(minimalRow, false);
-          if (lastChance) {
-            totalInserted++;
-            basicInsertions++;
-            console.log(`🆘 Successfully inserted ${runner.horse} with minimal data`);
-          }
-        } catch (lastError) {
-          console.error(`💥 Complete failure for ${runner.horse}: ${lastError.message}`);
-        }
+        console.error(`❌ Error upserting record for ${runner.horse}:`, error.message);
+        console.error(`❌ FAILED to upsert ${runner.horse}`);
       }
       
       // Small delay to avoid overwhelming the database
@@ -891,159 +784,58 @@ const processResults = async (results, isUpdate = false) => {
     }
   }
 
+  const completionRate = totalProcessed > 0 ? ((totalUpserted / totalProcessed) * 100).toFixed(1) : '0.0';
+
   console.log(`\n📊 FINAL PROCESSING SUMMARY:`);
-  console.log(`   Total processed: ${totalProcessed}`);
-  console.log(`   Successfully inserted: ${totalInserted}`);
-  console.log(`   Successfully updated: ${totalUpdated}`);
-  console.log(`   Basic/Minimal insertions: ${basicInsertions}`);
-  console.log(`   Errors: ${totalErrors}`);
+  console.log(`🐎 Total horses found: ${totalProcessed}`);
+  console.log(`✅ Successfully upserted: ${totalUpserted}`);
+  console.log(`❌ Errors: ${totalErrors}`);
+  console.log(`📈 Completion rate: ${completionRate}%`);
+  
+  console.log(`\n📋 MISSING DATA FIELDS SUMMARY:`);
+  console.log(`❌ Missing race_data (not found in database): ${missingDataCounts.race_data} horses`);
+  console.log(`❌ Missing runner_data (not found in database): ${missingDataCounts.runner_data} horses`);
+  console.log(`❌ Missing odds_data (not found in database): ${missingDataCounts.odds_data} horses`);
+  console.log(`❌ Missing bsp_data (not found in database): ${missingDataCounts.bsp_data} horses`);
+  console.log(`⚠️  Upsert was ${completionRate}% complete`);
   
   return {
     totalProcessed,
-    totalInserted,
-    totalUpdated,
+    totalUpserted,
     totalErrors,
-    basicInsertions
-  };
-};
-
-// Create basic master results row with just API data and safe defaults
-const createBasicMasterResultRow = (race, runner) => {
-  return {
-    // Core identifiers - ALWAYS available from API
-    race_id: race.race_id,
-    horse_id: runner.horse_id,
-    horse: runner.horse,
-    
-    // Race information - always from API
-    course: race.course,
-    course_id: race.course_id,
-    race_date: race.date,
-    off_time: race.off,
-    off_dt: race.off_dt,
-    race_name: race.race_name,
-    dist: race.dist,
-    pattern: race.pattern,
-    race_class: race.class,
-    type: race.type,
-    age_band: race.age_band,
-    rating_band: race.rating_band,
-    sex_rest: race.sex_rest,
-    going: race.going,
-    surface: race.surface,
-    jumps: race.jumps,
-    region: race.region,
-    
-    // Runner information - always from API
-    number: runner.number,
-    draw: runner.draw,
-    age: runner.age,
-    sex: runner.sex,
-    sire: runner.sire,
-    sire_id: runner.sire_id,
-    dam: runner.dam,
-    dam_id: runner.dam_id,
-    damsire: runner.damsire,
-    damsire_id: runner.damsire_id,
-    trainer: runner.trainer,
-    trainer_id: runner.trainer_id,
-    jockey: runner.jockey,
-    jockey_id: runner.jockey_id,
-    jockey_claim_lbs: runner.jockey_claim_lbs,
-    owner: runner.owner,
-    owner_id: runner.owner_id,
-    weight_lbs: runner.weight_lbs,
-    headgear: runner.headgear,
-    rpr: runner.rpr,
-    
-    // Results - always from API
-    position: runner.position,
-    sp: runner.sp,
-    sp_dec: runner.sp_dec,
-    time: runner.time,
-    or_rating: runner.or,
-    rpr_result: runner.rpr,
-    tsr_result: runner.tsr,
-    prize_won: runner.prize,
-    comment_result: runner.comment,
-    
-    // Race results - from API
-    winning_time_detail: race.winning_time_detail,
-    race_comments: race.comments,
-    non_runners: race.non_runners,
-    tote_win: race.tote_win,
-    tote_place: race.tote_pl,
-    tote_exacta: race.tote_ex,
-    tote_csf: race.tote_csf,
-    tote_tricast: race.tote_tricast,
-    tote_trifecta: race.tote_trifecta,
-    
-    // All other fields as null - will be updated by subsequent runs
-    distance_f: null,
-    distance_round: null,
-    going_detailed: null,
-    prize: null,
-    field_size: null,
-    big_race: false,
-    is_abandoned: false,
-    runner_id: null,
-    dob: null,
-    comment: null,
-    
-    // Set all technical analysis fields to null
-    "5_moving_average": null,
-    "20_moving_average": null,
-    "60_moving_average": null,
-    // ... all other complex fields as null
-  };
-};
-
-// Create absolute minimal row for emergency insertions
-const createMinimalMasterResultRow = (race, runner) => {
-  return {
-    race_id: race.race_id,
-    horse_id: runner.horse_id,
-    horse: runner.horse,
-    course: race.course,
-    race_date: race.date,
-    position: runner.position,
-    sp: runner.sp,
-    sp_dec: runner.sp_dec
+    completionRate: parseFloat(completionRate),
+    missingDataCounts
   };
 };
 
 // Main execution function
 const main = async () => {
+  console.log('🏁 Starting Master Results Population Script...');
+  console.log(`📅 Processing date: ${getYesterdayDate()}`);
+  
   try {
-    console.log('🚀 Starting Master Results Population Script');
-    
-    const targetDate = getYesterdayDate();
-    console.log(`📅 Target date (yesterday): ${targetDate}`);
-    
-    // Always run in UPDATE mode to ensure complete data
-    const isUpdate = true;
-    console.log(`🔄 Run mode: UPDATE (updating existing records with latest data)`)
-    
-    // Fetch results from API
-    const results = await fetchRacingResults(targetDate);
-    
-    console.log(`📊 API Response: ${results.results?.length || 0} races, ${results.total} total available`);
+    // Fetch racing results
+    console.log('\n📡 Fetching racing results from API...');
+    const results = await fetchRacingResults(getYesterdayDate());
     
     if (!results.results || results.results.length === 0) {
-      console.log('ℹ️  No results found for the target date');
+      console.log('❌ No racing results found for the specified date');
       return;
     }
     
-    console.log(`📋 Found ${results.results.length} races with results`);
+    console.log(`✅ Found ${results.results.length} races to process`);
     
-    // Process all results
-    const summary = await processResults(results, isUpdate);
+    // Process and insert/update results
+    console.log('\n🔄 Processing results and populating master_results table...');
+    const summary = await processResults(results, false); // false = insert new records only
     
-    console.log('\n🎉 Script completed successfully!');
-    console.log(`📈 Final stats: ${summary.totalInserted} inserted, ${summary.totalUpdated} updated, ${summary.totalErrors} errors`);
+    console.log(`\n🎉 Script completed successfully!`);
+    console.log(`📈 Final stats: ${summary.totalUpserted} upserted, ${summary.totalErrors} errors`);
+    console.log(`🏁 Completion rate: ${summary.completionRate}%`);
     
   } catch (error) {
-    console.error('💥 Script failed:', error.message);
+    console.error('💥 Script failed with error:', error.message);
+    console.error('Stack trace:', error.stack);
     process.exit(1);
   }
 };
