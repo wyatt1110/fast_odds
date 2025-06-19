@@ -13,7 +13,7 @@ console.log('🔄 CATCHUP MASTER RESULTS: Processing historical dates');
 
 // CATCHUP DATES - Edit these dates for historical data processing
 const CATCHUP_DATES = [
-  '2025-06-15'  // Processing June 15th to complete the range
+  '2025-06-17'  // Processing June 17th when the BSP script was broken
 ];
 
 // Enhanced API request with proper pagination and error handling
@@ -340,6 +340,10 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     prize_won: runner.prize,
     comment_result: runner.comment,
     
+    // Beaten Distance Data (from API: ovr_btn -> overall_beaten_distance_numeric, btn -> beaten_distance_numeric)
+    overall_beaten_distance_numeric: runner.ovr_btn ? parseFloat(runner.ovr_btn) : null,
+    beaten_distance_numeric: runner.btn ? parseFloat(runner.btn) : null,
+    
     // Race results
     winning_time_detail: race.winning_time_detail,
     race_comments: race.comments,
@@ -477,12 +481,37 @@ const processResults = async (results, isUpdate, targetDate) => {
       console.log(`\n${totalProcessed}. Processing ${runner.horse} (${runner.horse_id})...`);
       
       try {
-        // Check if record already exists
+        // Check if record already exists and what data it has
         const exists = await recordExists(race.race_id, runner.horse_id);
+        let needsUpdate = false;
+        let existingRecord = null;
         
-        if (exists && !isUpdate) {
-          console.log(`⏭️  Record already exists for ${runner.horse}, skipping...`);
-          continue;
+        if (exists) {
+          // Check if existing record has BSP data
+          const { data: existing, error: fetchError } = await supabase
+            .from('master_results')
+            .select('bsp, horse')
+            .eq('race_id', race.race_id)
+            .eq('horse_id', runner.horse_id)
+            .single();
+          
+          if (fetchError) {
+            console.warn(`⚠️  Error fetching existing record for ${runner.horse}:`, fetchError.message);
+          } else {
+            existingRecord = existing;
+            // Check if BSP data is missing or null
+            const hasBspData = existing.bsp !== null;
+            
+            if (!hasBspData) {
+              console.log(`🔄 Record exists for ${runner.horse} but BSP data is missing, updating...`);
+              needsUpdate = true;
+            } else if (!isUpdate) {
+              console.log(`⏭️  Record already exists for ${runner.horse} with complete data, skipping...`);
+              continue;
+            } else {
+              needsUpdate = true; // Force update in update mode
+            }
+          }
         }
         
         // ALWAYS INSERT PHILOSOPHY: Try comprehensive data first, fall back to basic if needed
@@ -527,7 +556,7 @@ const processResults = async (results, isUpdate, targetDate) => {
         }
         
         // Insert or update the record
-        const shouldUpdate = exists && isUpdate;
+        const shouldUpdate = exists && (isUpdate || needsUpdate);
         const success = await insertMasterResult(resultRow, shouldUpdate);
         
         if (success) {
@@ -642,6 +671,10 @@ const createBasicMasterResultRow = (race, runner) => {
     tsr_result: runner.tsr,
     prize_won: runner.prize,
     comment_result: runner.comment,
+    
+    // Beaten Distance Data (from API: ovr_btn -> overall_beaten_distance_numeric, btn -> beaten_distance_numeric)
+    overall_beaten_distance_numeric: runner.ovr_btn ? parseFloat(runner.ovr_btn) : null,
+    beaten_distance_numeric: runner.btn ? parseFloat(runner.btn) : null,
     
     // Race results - from API
     winning_time_detail: race.winning_time_detail,
