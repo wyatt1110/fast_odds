@@ -1,0 +1,34 @@
+name: Hourly Bet Results Update
+
+on:
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  update-results:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          # Remove cache option that was causing errors
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Run update script
+        run: node bet-results-updater.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          RACING_API_USERNAME: ${{ secrets.RACING_API_USERNAME }}
+          RACING_API_PASSWORD: ${{ secrets.RACING_API_PASSWORD }}
+      
+      - name: Log result
+        if: always()
+        run: |
+          echo "Script completed at $(date)"
