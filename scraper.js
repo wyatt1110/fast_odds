@@ -104,3 +104,27 @@ class TimeformScraper {
       throw error;
     }
   }
+
+  async scrapeRacecardUrls() {
+    console.log('🔗 Scraping racecard URLs...');
+    await this.page.goto(config.timeform.racecardsUrl, { waitUntil: 'networkidle2', timeout: config.puppeteer.timeout });
+    
+    // Ensure the page is fully loaded and interactive by waiting for a common element on the racecards page
+    // This might be redundant after goto, but adds robustness.
+    await this.page.waitForSelector('.meeting-page__container, .w-racecard-grid', { timeout: config.puppeteer.timeout });
+
+    const raceUrls = await this.page.evaluate(() => {
+      const urls = [];
+      // Select all links that contain '/horse-racing/racecards/' in their href attribute
+      document.querySelectorAll('a[href*="/horse-racing/racecards/"]').forEach(link => {
+        const href = link.href;
+        // Filter out links that are for meeting summaries or other non-racecard pages
+        if (href.includes('/horse-racing/racecards/') && !href.includes('meeting-summary')) {
+          urls.push(href);
+        }
+      });
+      return [...new Set(urls)]; // Return unique URLs
+    });
+    console.log(`✅ Found ${raceUrls.length} race URLs.`);
+    return raceUrls;
+  }
