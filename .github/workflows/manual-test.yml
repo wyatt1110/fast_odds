@@ -26,11 +26,10 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: timeform-scraper/package-lock.json
         
     - name: Install dependencies
       working-directory: ./timeform-scraper
-      run: npm ci
+      run: npm install
       
     - name: Install Puppeteer dependencies
       run: |
@@ -107,4 +106,4 @@ jobs:
           echo "- Puppeteer browser issues" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Check the logs above and artifacts for detailed error information." >> $GITHUB_STEP_SUMMARY
-        fi 
+        fi
