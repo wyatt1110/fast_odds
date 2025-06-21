@@ -9,12 +9,16 @@
     "bet365": "node bet365-odds-updater.js",
     "williamhill": "node williamhill-odds-updater.js",
     "dev": "node start-both.js",
-    "scheduler": "node master-results-scheduler.js"
+    "scheduler": "node master-results-scheduler.js",
+    "timeform": "node timeform-scraper.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/supabase-js": "^2.50.0",
+    "cheerio": "^1.1.0",
     "dotenv": "^16.5.0",
-    "node-cron": "^3.0.3"
+    "fs-extra": "^11.3.0",
+    "node-cron": "^3.0.3",
+    "puppeteer": "^24.10.2"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -25,7 +29,9 @@
     "api",
     "horse-racing",
     "bet365",
-    "williamhill"
+    "williamhill",
+    "timeform",
+    "scraper"
   ],
   "author": "OddsVantage",
   "license": "MIT",
@@ -33,4 +39,4 @@
     "type": "git",
     "url": "https://github.com/wyatt1110/fast_odds.git"
   }
-} 
+}
