@@ -1,0 +1,29 @@
+{
+  "name": "timeform-scraper",
+  "version": "1.0.0",
+  "description": "Production-ready Timeform horse racing data scraper for tomorrow's GB & IRE racecards",
+  "main": "timeform-scraper.js",
+  "scripts": {
+    "start": "node timeform-scraper.js",
+    "test": "node timeform-scraper.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.0",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.3.1",
+    "fs-extra": "^11.1.1",
+    "puppeteer": "^21.5.2"
+  },
+  "keywords": [
+    "timeform",
+    "scraper",
+    "horse-racing",
+    "betting",
+    "production"
+  ],
+  "author": "Miles Wigby",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 

@@ -1,0 +1,110 @@
+name: Manual Timeform Scraper Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug_mode:
+        description: 'Enable debug logging'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+
+jobs:
+  test-timeform-scraper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: timeform-scraper/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./timeform-scraper
+      run: npm ci
+      
+    - name: Install Puppeteer dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libnss3-dev \
+          libatk-bridge2.0-dev \
+          libdrm-dev \
+          libxkbcommon-dev \
+          libgtk-3-dev \
+          libgbm-dev \
+          libasound2-dev
+          
+    - name: Run Timeform Scraper Test
+      working-directory: ./timeform-scraper
+      env:
+        NODE_ENV: production
+        TIMEFORM_EMAIL: ${{ secrets.TIMEFORM_EMAIL }}
+        TIMEFORM_PASSWORD: ${{ secrets.TIMEFORM_PASSWORD }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
+      run: |
+        echo "🚀 Starting Timeform Scraper Test..."
+        echo "Debug Mode: $DEBUG_MODE"
+        echo "Target: Tomorrow's GB & IRE racecards"
+        echo "Environment: GitHub Actions"
+        echo "Node Version: $(node --version)"
+        echo "NPM Version: $(npm --version)"
+        echo ""
+        
+        # Run the scraper with timeout
+        timeout 900 npm start || {
+          echo "❌ Scraper timed out after 15 minutes"
+          exit 1
+        }
+        
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: timeform-scraper-logs-${{ github.run_number }}
+        path: |
+          timeform-scraper/*.json
+          timeform-scraper/*.log
+        retention-days: 7
+        
+    - name: Test Summary
+      if: always()
+      run: |
+        echo "## 🏇 Timeform Scraper Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Test Run:** #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Trigger:** Manual" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** GitHub Actions Ubuntu" >> $GITHUB_STEP_SUMMARY
+        echo "**Node Version:** $(node --version)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ **Status:** Test completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Timeform scraper ran without errors. Check the logs above for:" >> $GITHUB_STEP_SUMMARY
+          echo "- Number of races scraped" >> $GITHUB_STEP_SUMMARY
+          echo "- Number of horses processed" >> $GITHUB_STEP_SUMMARY
+          echo "- Database upload results" >> $GITHUB_STEP_SUMMARY
+          echo "- Any error details" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Status:** Test failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The test failed. Common issues:" >> $GITHUB_STEP_SUMMARY
+          echo "- Missing environment variables" >> $GITHUB_STEP_SUMMARY
+          echo "- Timeform login issues" >> $GITHUB_STEP_SUMMARY
+          echo "- Network connectivity problems" >> $GITHUB_STEP_SUMMARY
+          echo "- Puppeteer browser issues" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs above and artifacts for detailed error information." >> $GITHUB_STEP_SUMMARY
+        fi 
