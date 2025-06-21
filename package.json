@@ -16,9 +16,15 @@
     "@supabase/supabase-js": "^2.50.0",
     "cheerio": "^1.1.0",
     "dotenv": "^16.5.0",
+<<<<<<< HEAD
     "fs-extra": "^11.3.0",
     "node-cron": "^3.0.3",
     "puppeteer": "^24.10.2"
+=======
+    "node-cron": "^3.0.3",
+    "puppeteer": "^23.8.0",
+    "fs-extra": "^11.2.0"
+>>>>>>> b190dc8c00fb6158505c840740e77f005db3da9b
   },
   "engines": {
     "node": ">=18.0.0"
@@ -39,4 +45,8 @@
     "type": "git",
     "url": "https://github.com/wyatt1110/fast_odds.git"
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> b190dc8c00fb6158505c840740e77f005db3da9b

@@ -7,6 +7,9 @@ const { createClient } = require('@supabase/supabase-js');
 // Initialize Supabase client
 const supabase = createClient(config.supabase.url, config.supabase.serviceRoleKey);
 
+// Utility function to replace deprecated waitForTimeout
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 class TimeformScraper {
   constructor() {
     this.browser = null;
@@ -58,7 +61,7 @@ class TimeformScraper {
       await this.page.waitForSelector(signInSelector, { timeout: config.puppeteer.timeout });
       
       // Add a small delay to ensure element is fully interactive
-      await this.page.waitForTimeout(1000);
+      await delay(1000);
 
       // Click sign in using evaluate for more robustness
       await this.page.evaluate((selector) => {
@@ -505,7 +508,7 @@ class TimeformScraper {
         }
         
         // Add delay between requests to be respectful
-        await this.page.waitForTimeout(2000);
+        await delay(2000);
         
       } catch (error) {
         console.error(`❌ Error processing race ${i + 1}:`, error.message);
@@ -594,14 +597,14 @@ class TimeformScraper {
       }
 
       // Wait for the content to load
-      await this.page.waitForTimeout(3000);
+      await delay(3000);
       await this.page.waitForSelector('.w-racecard-grid-container', { timeout: config.puppeteer.timeout });
 
       // Ensure we're on GB & IRE region (should be default, but let's make sure)
       const gbIreButton = await this.page.$('button.w-course-region-tabs-button[data-region-id="0"]');
       if (gbIreButton) {
         await gbIreButton.click();
-        await this.page.waitForTimeout(2000);
+        await delay(2000);
       }
 
       // Extract all race URLs from GB & IRE region
@@ -662,7 +665,7 @@ class TimeformScraper {
         }
         
         // Add delay between requests to be respectful
-        await this.page.waitForTimeout(2000);
+        await delay(2000);
         
       } catch (error) {
         console.error(`❌ Error processing race ${i + 1}:`, error.message);
@@ -755,19 +758,19 @@ class TimeformScraper {
         if (buttonText === 'Today') {
           await todayButton.click();
           console.log('✅ Clicked Today button');
-          await this.page.waitForTimeout(2000);
+          await delay(2000);
         }
       }
 
       // Wait for the content to load
-      await this.page.waitForTimeout(3000);
+      await delay(3000);
       await this.page.waitForSelector('.w-racecard-grid-container', { timeout: config.puppeteer.timeout });
 
       // Ensure we're on GB & IRE region (should be default, but let's make sure)
       const gbIreButton = await this.page.$('button.w-course-region-tabs-button[data-region-id="0"]');
       if (gbIreButton) {
         await gbIreButton.click();
-        await this.page.waitForTimeout(2000);
+        await delay(2000);
       }
 
       // Extract all race URLs from GB & IRE region
@@ -828,7 +831,7 @@ class TimeformScraper {
         }
         
         // Add delay between requests to be respectful
-        await this.page.waitForTimeout(2000);
+        await delay(2000);
         
       } catch (error) {
         console.error(`❌ Error processing race ${i + 1}:`, error.message);

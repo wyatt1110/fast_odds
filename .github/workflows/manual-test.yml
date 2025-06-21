@@ -25,12 +25,9 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: timeform-scraper/package-lock.json
         
     - name: Install dependencies
-      working-directory: ./timeform-scraper
-      run: npm ci
+      run: npm install
       
     - name: Install Puppeteer dependencies
       run: |
@@ -45,7 +42,6 @@ jobs:
           libasound2-dev
           
     - name: Run Timeform Scraper Test
-      working-directory: ./timeform-scraper
       env:
         NODE_ENV: production
         TIMEFORM_EMAIL: ${{ secrets.TIMEFORM_EMAIL }}
@@ -63,7 +59,7 @@ jobs:
         echo ""
         
         # Run the scraper with timeout
-        timeout 900 npm start || {
+        timeout 900 node timeform-scraper.js || {
           echo "❌ Scraper timed out after 15 minutes"
           exit 1
         }
@@ -74,8 +70,8 @@ jobs:
       with:
         name: timeform-scraper-logs-${{ github.run_number }}
         path: |
-          timeform-scraper/*.json
-          timeform-scraper/*.log
+          *.json
+          *.log
         retention-days: 7
         
     - name: Test Summary
@@ -107,4 +103,4 @@ jobs:
           echo "- Puppeteer browser issues" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Check the logs above and artifacts for detailed error information." >> $GITHUB_STEP_SUMMARY
-        fi 
+        fi
