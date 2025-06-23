@@ -2,8 +2,8 @@ name: Manual Timeform Scraper Test
 
 on:
   schedule:
-    # Runs daily at 4:00 PM UK time (GMT+0 = UTC+0)
-    - cron: '0 16 * * *'
+    # Runs daily at 4:00 PM UK time (BST = GMT+1 = 15:00 UTC)
+    - cron: '0 15 * * *'
   workflow_dispatch:
     inputs:
       debug_mode:
