@@ -10,7 +10,8 @@
     "williamhill": "node williamhill-odds-updater.js",
     "dev": "node start-both.js",
     "scheduler": "node master-results-scheduler.js",
-    "timeform": "node timeform-scraper.js"
+    "timeform": "node timeform-scraper.js",
+    "jockey-trainer": "node daily-jockey-trainer-analysis.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.0",
