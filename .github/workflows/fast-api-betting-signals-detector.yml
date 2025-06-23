@@ -1,14 +1,15 @@
 name: Fast API Betting Signals Detector
 
-on:
-  # Manual triggering for testing
-  workflow_dispatch:
-    inputs:
-      test_run:
-        description: 'Test fast API betting signals script'
-        required: false
-        default: true
-        type: boolean
+# DISABLED - Fast odds script has been turned off, so this signals detector is no longer needed
+# on:
+#   # Manual triggering for testing
+#   workflow_dispatch:
+#     inputs:
+#       test_run:
+#         description: 'Test fast API betting signals script'
+#         required: false
+#         default: true
+#         type: boolean
 
 jobs:
   test-fast-api-signals:
