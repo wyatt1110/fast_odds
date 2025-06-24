@@ -205,6 +205,99 @@ const getBspData = async (horseName, raceDate, region) => {
   }
 };
 
+// Get timeform data from supabase
+const getTimeformData = async (raceId, horseId) => {
+  try {
+    const { data, error } = await supabase
+      .from('timeform')
+      .select('*')
+      .eq('race_id', raceId)
+      .eq('horse_id', horseId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.log(`⚠️  Timeform data error for ${horseId}: ${error.message}`);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.log(`⚠️  Timeform data exception for ${horseId}: ${error.message}`);
+    return null;
+  }
+};
+
+// Helper function to extract numeric value from adjusted timeform figures
+const extractNumericFromAdj = (adjValue) => {
+  if (!adjValue) return null;
+  // Remove 'p' prefix and '+' suffix, then convert to number
+  const numericString = adjValue.toString().replace(/^p/, '').replace(/\+$/, '');
+  const numeric = parseFloat(numericString);
+  return isNaN(numeric) ? null : numeric;
+};
+
+// Calculate timeform averages from past performance data
+const calculateTimeformAverages = (timeformData) => {
+  if (!timeformData) {
+    return {
+      lto_adj_tfr: null,
+      avr_adj_tfr: null,
+      lto_tfig: null,
+      avr_tfig: null,
+      lto_tfr: null,
+      avr_tfr: null
+    };
+  }
+
+  // Extract LTO (Last Time Out) values from pp_1 columns
+  const lto_adj_tfr = timeformData.pp_1_adj || null;
+  const lto_tfig = timeformData.pp_1_tfig || null;
+  const lto_tfr = timeformData.pp_1_tfr || null;
+
+  // Calculate averages from all past performances (pp_1 to pp_6)
+  const adjValues = [];
+  const tfigValues = [];
+  const tfrValues = [];
+
+  for (let i = 1; i <= 6; i++) {
+    const adjField = `pp_${i}_adj`;
+    const tfigField = `pp_${i}_tfig`;
+    const tfrField = `pp_${i}_tfr`;
+
+    if (timeformData[adjField]) {
+      const adjNumeric = extractNumericFromAdj(timeformData[adjField]);
+      if (adjNumeric !== null) adjValues.push(adjNumeric);
+    }
+
+    if (timeformData[tfigField]) {
+      const tfigNumeric = parseFloat(timeformData[tfigField]);
+      if (!isNaN(tfigNumeric)) tfigValues.push(tfigNumeric);
+    }
+
+    if (timeformData[tfrField]) {
+      const tfrNumeric = parseFloat(timeformData[tfrField]);
+      if (!isNaN(tfrNumeric)) tfrValues.push(tfrNumeric);
+    }
+  }
+
+  // Calculate averages
+  const avr_adj_tfr = adjValues.length > 0 ? 
+    adjValues.reduce((sum, val) => sum + val, 0) / adjValues.length : null;
+  const avr_tfig = tfigValues.length > 0 ? 
+    tfigValues.reduce((sum, val) => sum + val, 0) / tfigValues.length : null;
+  const avr_tfr = tfrValues.length > 0 ? 
+    tfrValues.reduce((sum, val) => sum + val, 0) / tfrValues.length : null;
+
+  return {
+    lto_adj_tfr,
+    avr_adj_tfr: avr_adj_tfr ? parseFloat(avr_adj_tfr.toFixed(2)) : null,
+    lto_tfig,
+    avr_tfig: avr_tfig ? parseFloat(avr_tfig.toFixed(2)) : null,
+    lto_tfr,
+    avr_tfr: avr_tfr ? parseFloat(avr_tfr.toFixed(2)) : null
+  };
+};
+
 // Enhanced derived fields calculation
 const calculateDerivedFields = (runner, oddsData) => {
   const position = parseInt(runner.position) || null;
@@ -251,8 +344,9 @@ const calculateDerivedFields = (runner, oddsData) => {
 };
 
 // Complete master results row builder matching new schema
-const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData) => {
+const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData, timeformData) => {
   const derivedFields = calculateDerivedFields(runner, oddsData);
+  const timeformAverages = calculateTimeformAverages(timeformData);
   
   // Build comprehensive row with all required columns
   const masterRow = {
@@ -366,6 +460,40 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     ipmax: bspData?.ipmax || null,
     ipmin: bspData?.ipmin || null,
     total_traded_volume: bspData ? (bspData.morningtradedvol || 0) + (bspData.pptradedvol || 0) + (bspData.iptradedvol || 0) : null,
+    
+    // Jockey Statistics (from runners table)
+    jockey_lifetime: runnerData?.jockey_lifetime || null,
+    jockey_12_months: runnerData?.jockey_12_months || null,
+    jockey_3_months: runnerData?.jockey_3_months || null,
+    jockey_trainer: runnerData?.jockey_trainer || null,
+    jockey_trainer_3_months: runnerData?.jockey_trainer_3_months || null,
+    jockey_course: runnerData?.jockey_course || null,
+    jockey_owner: runnerData?.jockey_owner || null,
+    
+    // Trainer Statistics (from runners table)
+    trainer_lifetime: runnerData?.trainer_lifetime || null,
+    trainer_12_months: runnerData?.trainer_12_months || null,
+    trainer_3_months: runnerData?.trainer_3_months || null,
+    trainer_course: runnerData?.trainer_course || null,
+    trainer_jockey: runnerData?.trainer_jockey || null,
+    trainer_jockey_3_months: runnerData?.trainer_jockey_3_months || null,
+    trainer_owner: runnerData?.trainer_owner || null,
+    
+    // Timeform Data (from timeform table)
+    timeform_rating: timeformData?.timeform_rating || null,
+    pacemap_1: timeformData?.pacemap_1 || null,
+    pacemap_2: timeformData?.pacemap_2 || null,
+    pace_forecast: timeformData?.pace_forecast || null,
+    draw_bias: timeformData?.draw_bias || null,
+    specific_pace_hint: timeformData?.specific_pace_hint || null,
+    
+    // Timeform Calculated Averages
+    lto_adj_tfr: timeformAverages.lto_adj_tfr,
+    avr_adj_tfr: timeformAverages.avr_adj_tfr,
+    lto_tfig: timeformAverages.lto_tfig,
+    avr_tfig: timeformAverages.avr_tfig,
+    lto_tfr: timeformAverages.lto_tfr,
+    avr_tfr: timeformAverages.avr_tfr,
     
     // Derived fields
     ...derivedFields
@@ -521,19 +649,21 @@ const processResults = async (results, isUpdate, targetDate) => {
         try {
           // Attempt full data retrieval and processing
           const raceData = await getRaceData(race.race_id);
-          const [runnerData, oddsData, bspData] = await Promise.all([
+          const [runnerData, oddsData, bspData, timeformData] = await Promise.all([
             getRunnerData(race.race_id, runner.horse_id),
             getOddsData(race.race_id, runner.horse_id),
-            getBspData(runner.horse, race.date, race.region)
+            getBspData(runner.horse, race.date, race.region),
+            getTimeformData(race.race_id, runner.horse_id)
           ]);
           
           // Try to build complete row
-          resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData);
+          resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData, timeformData);
           
           const dataStatus = [
             runnerData ? 'Runner✅' : 'Runner❌',
             oddsData ? 'Odds✅' : 'Odds❌', 
-            bspData ? 'BSP✅' : 'BSP❌'
+            bspData ? 'BSP✅' : 'BSP❌',
+            timeformData ? 'Timeform✅' : 'Timeform❌'
           ].join(' ');
           console.log(`📊 ${runner.horse}: ${dataStatus}`);
           
