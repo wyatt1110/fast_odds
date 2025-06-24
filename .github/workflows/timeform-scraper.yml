@@ -1,0 +1,48 @@
+name: Timeform Scraper
+
+on:
+  schedule:
+    # Runs daily at 15:00 UK time (3:00 PM)
+    - cron: '0 14 * * *'  # 14:00 UTC (covers BST) 
+    - cron: '0 15 * * *'  # 15:00 UTC (covers GMT)
+    # Runs daily at 22:00 UK time (10:00 PM)  
+    - cron: '0 21 * * *'  # 21:00 UTC (covers BST)
+    - cron: '0 22 * * *'  # 22:00 UTC (covers GMT)
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  timeform-scraper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Add required dependencies
+      run: |
+        npm install dotenv @supabase/supabase-js
+      
+    - name: Run timeform scraper
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        TZ: Europe/London
+      run: |
+        echo "📊 Starting Timeform Scraper..."
+        echo "Run time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        node timeform-scraper.js
+      
+    - name: Log completion
+      run: |
+        echo "✅ Timeform scraper completed at $(date)"
+        echo "🕒 Next run scheduled for 15:00 & 22:00 UK time" 

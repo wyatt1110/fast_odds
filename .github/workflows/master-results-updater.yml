@@ -2,10 +2,12 @@ name: Master Results Updater
 
 on:
   schedule:
-    # Run daily at 12:00 UK time to populate master results
-    # 12:00 UK Winter (GMT) = 12:00 UTC | 12:00 UK Summer (BST) = 11:00 UTC
+    # Run daily at 12:00 UK time
     - cron: '0 11 * * *'  # 11:00 UTC (covers BST)
     - cron: '0 12 * * *'  # 12:00 UTC (covers GMT)
+    # Run daily at 20:00 UK time (8:00 PM)
+    - cron: '0 19 * * *'  # 19:00 UTC (covers BST) 
+    - cron: '0 20 * * *'  # 20:00 UTC (covers GMT)
     
   workflow_dispatch: # Allow manual triggering
 
@@ -42,3 +44,4 @@ jobs:
     - name: Log completion
       run: |
         echo "✅ Master results update completed at $(date)"
+        echo "🕒 Next runs scheduled for 12:00 PM & 8:00 PM UK time"
