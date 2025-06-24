@@ -4,8 +4,8 @@ require('dotenv').config({ path: '.env.local' });
 
 // Supabase client
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // The Racing API configuration
@@ -69,7 +69,7 @@ async function makeAPICall(endpoint, retries = MAX_RETRIES) {
 
       if (response.status === 429) {
         // Rate limited - exponential backoff
-        const retryDelay = Math.min(4000 * attempt, 15000); // Up to 15 seconds
+        const retryDelay = Math.min(15000 * attempt, 60000); // Up to 60 seconds
         console.log(`⚠️  Rate limited, retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${retries})`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
         continue;
@@ -78,11 +78,6 @@ async function makeAPICall(endpoint, retries = MAX_RETRIES) {
       if (response.status === 401) {
         console.error(`❌ Authentication failed (401) - check API credentials`);
         throw new Error(`API call failed: ${response.status} ${response.statusText}`);
-      }
-
-      if (response.status === 404) {
-        console.log(`⚠️  Endpoint not found (404) - skipping: ${endpoint}`);
-        return null; // Return null for 404s, don't retry
       }
 
       if (!response.ok) {
@@ -101,7 +96,7 @@ async function makeAPICall(endpoint, retries = MAX_RETRIES) {
       }
       
       // Progressive retry delay
-      const retryDelay = Math.min(4000 * attempt, 15000);
+      const retryDelay = Math.min(8000 * attempt, 30000);
       console.log(`⏳ Retrying in ${retryDelay / 1000}s...`);
       await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
@@ -115,11 +110,6 @@ async function searchEntityIdCached(entityType, name) {
   const cleanedName = cleanName(name);
   const cacheKey = cleanedName.toLowerCase();
   
-  // Ensure the cache exists for this entity type
-  if (!entityCache[entityType]) {
-    entityCache[entityType] = new Map();
-  }
-  
   // Check cache first
   if (entityCache[entityType].has(cacheKey)) {
     const cachedId = entityCache[entityType].get(cacheKey);
@@ -128,17 +118,8 @@ async function searchEntityIdCached(entityType, name) {
   }
   
   try {
-    // Use correct endpoint format (plural form)
-    const endpoint = `/${entityType}s/search?name=${encodeURIComponent(cleanedName)}`;
     console.log(`🔍 Searching for ${entityType}: ${name}`);
-    const searchResult = await makeAPICall(endpoint);
-    
-    // Handle null response from 404 errors
-    if (searchResult === null) {
-      console.log(`❌ ${entityType} search endpoint not available - caching null`);
-      entityCache[entityType].set(cacheKey, null);
-      return null;
-    }
+    const searchResult = await makeAPICall(`/${entityType}/search?name=${encodeURIComponent(cleanedName)}`);
     
     if (searchResult?.search_results?.length > 0) {
       const entity = searchResult.search_results[0];
@@ -155,8 +136,6 @@ async function searchEntityIdCached(entityType, name) {
     return null;
   } catch (error) {
     console.error(`❌ Error searching for ${entityType} ${name}:`, error.message);
-    // Cache failed searches to avoid retrying
-    entityCache[entityType].set(cacheKey, null);
     return null;
   }
 }
@@ -273,7 +252,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     // 2. Get recent results for 12-month and 3-month analysis (combined call with larger limit)
     console.log('📈 Getting jockey recent results...');
     const twelveMonthsAgoStr = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}`);
+    const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=100`);
     
     if (recentResults && recentResults.results) {
       // Calculate 12-month stats
