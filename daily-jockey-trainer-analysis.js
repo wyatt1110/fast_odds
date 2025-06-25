@@ -10,8 +10,8 @@ const supabase = createClient(
 
 // The Racing API configuration
 const API_BASE_URL = 'https://api.theracingapi.com/v1';
-const API_USERNAME = process.env.RACING_API_USERNAME;
-const API_PASSWORD = process.env.RACING_API_PASSWORD;
+const API_USERNAME = process.env.RACING_API_USERNAME || 'KQ9W7rQeAHWMUgxH93ie3yEc';
+const API_PASSWORD = process.env.RACING_API_PASSWORD || 'T5BoPivL3Q2h6RhCdLv4EwZu';
 
 // Entity caches to avoid duplicate searches
 const entityCache = {
@@ -58,6 +58,7 @@ async function makeAPICall(endpoint, retries = MAX_RETRIES) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       console.log(`Making API call to: ${endpoint} (attempt ${attempt}/${retries})`);
+      console.log(`Using API credentials: ${API_USERNAME ? 'USERNAME_SET' : 'NO_USERNAME'} / ${API_PASSWORD ? 'PASSWORD_SET' : 'NO_PASSWORD'}`);
       
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         headers: {
@@ -77,10 +78,14 @@ async function makeAPICall(endpoint, retries = MAX_RETRIES) {
 
       if (response.status === 401) {
         console.error(`❌ Authentication failed (401) - check API credentials`);
+        console.error(`❌ API Response: ${response.status} ${response.statusText}`);
         throw new Error(`API call failed: ${response.status} ${response.statusText}`);
       }
 
       if (!response.ok) {
+        console.error(`❌ API call failed: ${response.status} ${response.statusText}`);
+        const responseText = await response.text();
+        console.error(`❌ Response body: ${responseText}`);
         throw new Error(`API call failed: ${response.status} ${response.statusText}`);
       }
 
