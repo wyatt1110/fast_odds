@@ -1,4 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config({ path: '.env' });
 require('dotenv').config({ path: '.env.local' });
 
@@ -13,7 +15,50 @@ const API_BASE_URL = 'https://api.theracingapi.com/v1';
 const API_USERNAME = process.env.RACING_API_USERNAME || 'KQ9W7rQeAHWMUgxH93ie3yEc';
 const API_PASSWORD = process.env.RACING_API_PASSWORD || 'T5BoPivL3Q2h6RhCdLv4EwZu';
 
-// Entity caches to avoid duplicate searches
+// Persistent entity cache file path
+const CACHE_FILE_PATH = path.join(__dirname, 'entity-cache.json');
+
+// Load persistent cache from file
+function loadPersistentCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE_PATH)) {
+      const cacheData = JSON.parse(fs.readFileSync(CACHE_FILE_PATH, 'utf8'));
+      console.log(`📁 Loaded persistent cache: ${Object.keys(cacheData.jockeys).length} jockeys, ${Object.keys(cacheData.trainers).length} trainers, ${Object.keys(cacheData.owners).length} owners`);
+      return cacheData;
+    }
+  } catch (error) {
+    console.error('⚠️  Error loading persistent cache:', error.message);
+  }
+  
+  // Return empty cache if file doesn't exist or error
+  return {
+    jockeys: {},
+    trainers: {},
+    owners: {},
+    last_updated: new Date().toISOString(),
+    stats: { total_entities: 0, api_calls_saved: 0 }
+  };
+}
+
+// Save persistent cache to file
+function savePersistentCache(cacheData) {
+  try {
+    cacheData.last_updated = new Date().toISOString();
+    cacheData.stats.total_entities = Object.keys(cacheData.jockeys).length + 
+                                    Object.keys(cacheData.trainers).length + 
+                                    Object.keys(cacheData.owners).length;
+    
+    fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(cacheData, null, 2));
+    console.log(`💾 Saved persistent cache: ${cacheData.stats.total_entities} entities, ${cacheData.stats.api_calls_saved} API calls saved`);
+  } catch (error) {
+    console.error('⚠️  Error saving persistent cache:', error.message);
+  }
+}
+
+// Load persistent cache at startup
+const persistentCache = loadPersistentCache();
+
+// In-memory cache for this session (keeps existing functionality)
 const entityCache = {
   jockeys: new Map(),
   trainers: new Map(),
@@ -120,10 +165,20 @@ async function searchEntityIdCached(entityType, name) {
     entityCache[entityType] = new Map();
   }
   
-  // Check cache first
+  // Check in-memory cache first
   if (entityCache[entityType].has(cacheKey)) {
     const cachedId = entityCache[entityType].get(cacheKey);
-    console.log(`📋 Using cached ${entityType}: ${name} (ID: ${cachedId})`);
+    console.log(`📋 Using session cache ${entityType}: ${name} (ID: ${cachedId})`);
+    return cachedId;
+  }
+  
+  // Check persistent cache second
+  if (persistentCache[entityType][cacheKey]) {
+    const cachedId = persistentCache[entityType][cacheKey];
+    // Add to session cache for faster access
+    entityCache[entityType].set(cacheKey, cachedId);
+    persistentCache.stats.api_calls_saved++;
+    console.log(`💾 Using persistent cache ${entityType}: ${name} (ID: ${cachedId}) - Saved API call!`);
     return cachedId;
   }
   
@@ -133,15 +188,20 @@ async function searchEntityIdCached(entityType, name) {
     
     if (searchResult?.search_results?.length > 0) {
       const entity = searchResult.search_results[0];
-      console.log(`✅ Found ${entityType}: ${entity.name} (ID: ${entity.id})`);
+      console.log(`✅ Found ${entityType}: ${entity.name} (ID: ${entity.id}) - NEW DISCOVERY!`);
       
-      // Cache the result
+      // Cache in both session and persistent cache
       entityCache[entityType].set(cacheKey, entity.id);
+      persistentCache[entityType][cacheKey] = entity.id;
+      
+      // Save to file immediately for persistence
+      savePersistentCache(persistentCache);
+      
       return entity.id;
     }
     
     console.log(`❌ No ${entityType} found for: ${name}`);
-    // Cache null results to avoid repeated searches
+    // Cache null results to avoid repeated searches (session only)
     entityCache[entityType].set(cacheKey, null);
     return null;
   } catch (error) {
@@ -762,6 +822,12 @@ async function processTodaysRunners() {
     console.log(`Total runners processed: ${processedCount}`);
     console.log(`Successfully updated: ${successCount}`);
     console.log(`Failed: ${processedCount - successCount}`);
+    
+    // Show cache performance
+    console.log(`\n📊 Cache Performance:`);
+    console.log(`💾 Persistent cache entities: ${persistentCache.stats.total_entities}`);
+    console.log(`🚀 API calls saved this session: ${persistentCache.stats.api_calls_saved}`);
+    console.log(`📁 Cache file: ${CACHE_FILE_PATH}`);
     
   } catch (error) {
     console.error('Script error:', error.message);
