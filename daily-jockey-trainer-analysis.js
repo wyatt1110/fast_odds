@@ -708,7 +708,7 @@ async function processTodaysRunners() {
       try {
         // Get entity IDs and course name
         const courseName = race?.course || '';
-        const ownerId = await searchEntityIdCached('owner', runner.owner);
+        const ownerId = await searchEntityIdCached('owners', runner.owner);
         
         // Analyze jockey
         let jockeyAnalysis = {};
