@@ -708,6 +708,7 @@ async function processTodaysRunners() {
         // Analyze jockey
         let jockeyAnalysis = {};
         if (runner.jockey_id) {
+          console.log(`🔍 Starting jockey analysis for: ${runner.jockey} (ID: ${runner.jockey_id})`);
           jockeyAnalysis = await analyzeJockey(
             runner.jockey_id,
             runner.jockey,
@@ -716,11 +717,13 @@ async function processTodaysRunners() {
             ownerId,
             runner.age
           );
+          console.log(`✅ Jockey analysis complete:`, Object.keys(jockeyAnalysis).length, 'fields');
         }
         
         // Analyze trainer
         let trainerAnalysis = {};
         if (runner.trainer_id) {
+          console.log(`🔍 Starting trainer analysis for: ${runner.trainer} (ID: ${runner.trainer_id})`);
           trainerAnalysis = await analyzeTrainer(
             runner.trainer_id,
             runner.trainer,
@@ -729,12 +732,20 @@ async function processTodaysRunners() {
             ownerId,
             runner.age
           );
+          console.log(`✅ Trainer analysis complete:`, Object.keys(trainerAnalysis).length, 'fields');
         }
         
         // Update runner with analysis
+        console.log(`💾 Updating runner ${runner.id} with analysis data...`);
+        console.log(`📊 Jockey analysis data:`, JSON.stringify(jockeyAnalysis, null, 2));
+        console.log(`📊 Trainer analysis data:`, JSON.stringify(trainerAnalysis, null, 2));
+        
         const success = await updateRunnerAnalysis(runner.id, jockeyAnalysis, trainerAnalysis);
         if (success) {
           successCount++;
+          console.log(`✅ Runner ${runner.id} updated successfully`);
+        } else {
+          console.log(`❌ Failed to update runner ${runner.id}`);
         }
         
       } catch (error) {
