@@ -115,6 +115,11 @@ async function searchEntityIdCached(entityType, name) {
   const cleanedName = cleanName(name);
   const cacheKey = cleanedName.toLowerCase();
   
+  // Initialize cache if not exists
+  if (!entityCache[entityType]) {
+    entityCache[entityType] = new Map();
+  }
+  
   // Check cache first
   if (entityCache[entityType].has(cacheKey)) {
     const cachedId = entityCache[entityType].get(cacheKey);
@@ -257,7 +262,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     // 2. Get recent results for 12-month and 3-month analysis (combined call with larger limit)
     console.log('📈 Getting jockey recent results...');
     const twelveMonthsAgoStr = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=100`);
+    const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=50`);
     
     if (recentResults && recentResults.results) {
       // Calculate 12-month stats
