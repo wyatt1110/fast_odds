@@ -209,25 +209,37 @@ class TimeformScraper {
         }
 
         // Extract race time
-        // Prioritize extracting from the title tag
-        const titleMatch = document.title.match(/(\d{1,2}:\d{2}) [A-Z ]+\|/);
+        // Prioritize extracting from the title tag with improved regex
+        const titleMatch = document.title.match(/(\d{1,2}:\d{2})/);
         if (titleMatch) {
             raceDataInBrowser.raceTime = titleMatch[1];
+            console.log(`BROWSER CONSOLE: DEBUG - Race time extracted from title: ${titleMatch[1]}`);
         } else {
             // Fallback: Extract from JSON-LD if title tag not found or fails
             const schemaScript = document.querySelector('script[type="application/ld+json"]');
             if (schemaScript) {
                 try {
                     const jsonData = JSON.parse(schemaScript.textContent);
-                    raceDataInBrowser.raceTime = jsonData.startDate ? jsonData.startDate.substring(11, 16) : null;
+                    if (jsonData.startDate) {
+                        raceDataInBrowser.raceTime = jsonData.startDate.substring(11, 16);
+                        console.log(`BROWSER CONSOLE: DEBUG - Race time extracted from JSON-LD: ${raceDataInBrowser.raceTime}`);
+                    }
                 } catch (e) {
                     console.error("Error parsing JSON-LD for race time:", e);
                 }
             }
         }
 
+        // Final fallback: Use the initial race time from URL if still no race time found
+        if (!raceDataInBrowser.raceTime && initialRaceData.raceTime) {
+            raceDataInBrowser.raceTime = initialRaceData.raceTime;
+            console.log(`BROWSER CONSOLE: DEBUG - Using race time from URL as fallback: ${initialRaceData.raceTime}`);
+        }
+
         if (!raceDataInBrowser.raceTime) {
             console.warn(`Could not extract raceTime for ${raceDataInBrowser.url}`);
+        } else {
+            console.log(`BROWSER CONSOLE: DEBUG - Final race time set to: ${raceDataInBrowser.raceTime}`);
         }
 
         // Extract Pace Forecast, Draw Bias, and Specific Pace Hint from rp-header-table
@@ -651,11 +663,17 @@ class TimeformScraper {
         const date = urlParts[6] || new Date().toISOString().slice(0, 10);
         const time = urlParts[7] || '0000';
         
+        const raceTimeFromUrl = `${time.slice(0, 2)}:${time.slice(2, 4)}`;
+        console.log(`📍 URL parsing for ${raceUrl}:`);
+        console.log(`   Course: ${course}`);
+        console.log(`   Date: ${date}`);
+        console.log(`   Time from URL: ${time} -> ${raceTimeFromUrl}`);
+        
         const initialRaceData = {
           url: raceUrl,
           course: course.charAt(0).toUpperCase() + course.slice(1).replace(/-/g, ' '),
           raceDate: date,
-          raceTime: `${time.slice(0, 2)}:${time.slice(2, 4)}`,
+          raceTime: raceTimeFromUrl,
           runners: []
         };
 
@@ -817,11 +835,17 @@ class TimeformScraper {
         const date = urlParts[6] || new Date().toISOString().slice(0, 10);
         const time = urlParts[7] || '0000';
         
+        const raceTimeFromUrl = `${time.slice(0, 2)}:${time.slice(2, 4)}`;
+        console.log(`📍 URL parsing for ${raceUrl}:`);
+        console.log(`   Course: ${course}`);
+        console.log(`   Date: ${date}`);
+        console.log(`   Time from URL: ${time} -> ${raceTimeFromUrl}`);
+        
         const initialRaceData = {
           url: raceUrl,
           course: course.charAt(0).toUpperCase() + course.slice(1).replace(/-/g, ' '),
           raceDate: date,
-          raceTime: `${time.slice(0, 2)}:${time.slice(2, 4)}`,
+          raceTime: raceTimeFromUrl,
           runners: []
         };
 
