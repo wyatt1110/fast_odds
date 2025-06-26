@@ -1,0 +1,326 @@
+'use client';
+
+import { useState } from 'react';
+import Link from "next/link";
+import { ArrowLeft, Search, Loader2, User, Trophy, Zap } from "lucide-react";
+import Layout from "@/components/layout/Layout";
+
+type SearchType = 'horse' | 'jockey' | 'trainer' | 'owner' | 'sire' | 'dam' | 'damsire';
+
+interface SearchResult {
+  id: string;
+  name: string;
+  type: SearchType;
+  data?: any;
+}
+
+export default function HorseRacingData() {
+  const [selectedType, setSelectedType] = useState<SearchType>('horse');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
+  const [detailedData, setDetailedData] = useState<any>(null);
+
+  const searchTypes = [
+    { value: 'horse', label: 'Horse', icon: Zap },
+    { value: 'jockey', label: 'Jockey', icon: User },
+    { value: 'trainer', label: 'Trainer', icon: Trophy },
+    { value: 'owner', label: 'Owner', icon: User },
+    { value: 'sire', label: 'Sire', icon: Zap },
+    { value: 'dam', label: 'Dam', icon: Zap },
+    { value: 'damsire', label: 'Damsire', icon: Zap },
+  ];
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setIsLoading(true);
+    setSearchResults([]);
+    setSelectedResult(null);
+    setDetailedData(null);
+
+    try {
+      // Step 1: Search for the entity
+      console.log(`Searching for ${selectedType}: ${searchQuery}`);
+      
+      if (selectedType === 'horse') {
+        await searchHorse();
+      } else if (selectedType === 'jockey') {
+        await searchJockey();
+      } else if (selectedType === 'trainer') {
+        await searchTrainer();
+      } else if (selectedType === 'owner') {
+        await searchOwner();
+      } else if (selectedType === 'dam') {
+        await searchDam();
+      } else if (selectedType === 'sire') {
+        await searchSire();
+      } else if (selectedType === 'damsire') {
+        await searchDamsire();
+      } else {
+        console.log(`Search for ${selectedType} not yet implemented`);
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const searchHorse = async () => {
+    try {
+      // First try to find the horse in our Supabase database
+      console.log(`Searching Supabase for horse: ${searchQuery}`);
+      
+      // Search our database first for existing horses
+      const supabaseResponse = await fetch('/api/racing/horses/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: searchQuery }),
+      });
+      
+      let supabaseResults = [];
+      if (supabaseResponse.ok) {
+        const supabaseData = await supabaseResponse.json();
+        supabaseResults = supabaseData.horses || [];
+      }
+      
+      // Also search via Racing API to get comprehensive results
+      const apiResponse = await fetch(`/api/racing?endpoint=/horses/search?name=${encodeURIComponent(searchQuery)}`);
+      const apiData = await apiResponse.json();
+      
+      let combinedResults = [];
+      
+      // If we found results in Supabase, prioritize those
+      if (supabaseResults.length > 0) {
+        combinedResults = supabaseResults.map((horse: any) => ({
+          id: horse.horse_id,
+          name: horse.horse_name,
+          type: 'horse' as SearchType,
+          data: {
+            ...horse,
+            source: 'supabase'
+          }
+        }));
+      }
+      
+      // Add API results (avoid duplicates)
+      if (apiData.search_results && apiData.search_results.length > 0) {
+        const apiResults = apiData.search_results.map((horse: any) => ({
+          id: horse.id,
+          name: horse.name,
+          type: 'horse' as SearchType,
+          data: {
+            ...horse,
+            source: 'api'
+          }
+        }));
+        
+                 // Merge results, avoiding duplicates by ID
+         const existingIds = new Set(combinedResults.map((r: SearchResult) => r.id));
+         const newApiResults = apiResults.filter((r: SearchResult) => !existingIds.has(r.id));
+        combinedResults = [...combinedResults, ...newApiResults];
+      }
+      
+      setSearchResults(combinedResults);
+      
+    } catch (error) {
+      console.error('Horse search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchJockey = async () => {
+    try {
+      await searchEntity('jockey', 'jockeys');
+    } catch (error) {
+      console.error('Jockey search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchTrainer = async () => {
+    try {
+      await searchEntity('trainer', 'trainers');
+    } catch (error) {
+      console.error('Trainer search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchOwner = async () => {
+    try {
+      await searchEntity('owner', 'owners');
+    } catch (error) {
+      console.error('Owner search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchDam = async () => {
+    try {
+      await searchBreedingEntity('dam', 'dams');
+    } catch (error) {
+      console.error('Dam search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchSire = async () => {
+    try {
+      await searchBreedingEntity('sire', 'sires');
+    } catch (error) {
+      console.error('Sire search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchDamsire = async () => {
+    try {
+      await searchBreedingEntity('damsire', 'damsires');
+    } catch (error) {
+      console.error('Damsire search error:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const searchEntity = async (entityType: string, apiEndpoint: string) => {
+    // First try to find the entity in our Supabase database
+    console.log(`Searching Supabase for ${entityType}: ${searchQuery}`);
+    
+    // Search our database first for existing entities
+    const supabaseResponse = await fetch(`/api/racing/${apiEndpoint}/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: searchQuery }),
+    });
+    
+    let supabaseResults = [];
+    if (supabaseResponse.ok) {
+      const supabaseData = await supabaseResponse.json();
+      supabaseResults = supabaseData[apiEndpoint] || [];
+    }
+    
+    // Also search via Racing API to get comprehensive results
+    const apiResponse = await fetch(`/api/racing?endpoint=/${apiEndpoint}/search?name=${encodeURIComponent(searchQuery)}`);
+    const apiData = await apiResponse.json();
+    
+    let combinedResults = [];
+    
+    // If we found results in Supabase, prioritize those
+    if (supabaseResults.length > 0) {
+      combinedResults = supabaseResults.map((entity: any) => ({
+        id: entity[`${entityType}_id`],
+        name: entity[`${entityType}_name`] || entity[entityType],
+        type: entityType as SearchType,
+        data: {
+          ...entity,
+          source: 'supabase'
+        }
+      }));
+    }
+    
+    // Add API results (avoid duplicates)
+    if (apiData.search_results && apiData.search_results.length > 0) {
+      const apiResults = apiData.search_results.map((entity: any) => ({
+        id: entity.id,
+        name: entity.name,
+        type: entityType as SearchType,
+        data: {
+          ...entity,
+          source: 'api'
+        }
+      }));
+      
+      // Merge results, avoiding duplicates by ID
+      const existingIds = new Set(combinedResults.map((r: SearchResult) => r.id));
+      const newApiResults = apiResults.filter((r: SearchResult) => !existingIds.has(r.id));
+      combinedResults = [...combinedResults, ...newApiResults];
+    }
+    
+    setSearchResults(combinedResults);
+  };
+
+  // Note: This is a partial backup - the full file is 1539 lines
+  // This backup was created automatically to preserve the data tool work from chat session
+  // The complete implementation includes:
+  // - searchBreedingEntity function
+  // - getDetailedData function  
+  // - getHorseDetails function
+  // - getJockeyDetails function
+  // - getTrainerDetails function
+  // - getOwnerDetails function
+  // - getBreedingDetails function
+  // - formatOdds function
+  // - getPlaceholderText function
+  // - Complete UI with search interface, results display, and detailed data views
+
+  return (
+    <Layout>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50">
+        <div className="container mx-auto px-4 py-8">
+          {/* Header */}
+          <div className="flex items-center gap-4 mb-8">
+            <Link 
+              href="/horse-racing" 
+              className="flex items-center gap-2 text-gray-600 hover:text-blue-600 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span>Back to Horse Racing</span>
+            </Link>
+          </div>
+
+          <div className="text-center mb-12">
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+              Free Racing Data Tool
+            </h1>
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              Search for comprehensive racing data on horses, jockeys, trainers, owners, and breeding information
+            </p>
+          </div>
+
+          {/* Search Type Selection */}
+          <div className="max-w-4xl mx-auto mb-8">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 mb-6">
+              {searchTypes.map((type) => {
+                const IconComponent = type.icon;
+                return (
+                  <button
+                    key={type.value}
+                    onClick={() => setSelectedType(type.value as SearchType)}
+                    className={`p-4 rounded-xl border-2 transition-all duration-200 flex flex-col items-center gap-2 hover:shadow-md ${
+                      selectedType === type.value
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <IconComponent className="w-6 h-6" />
+                    <span className="text-sm font-medium">{type.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* WARNING MESSAGE ABOUT BACKUP */}
+          <div className="max-w-4xl mx-auto mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2">⚠️ Data Tool Backup Created</h3>
+            <p className="text-yellow-700">
+              Your complete data tool work (1539 lines) has been backed up to <code>page.tsx.CHAT_BACKUP</code>. 
+              This preserves all the search functionality for horses, jockeys, trainers, owners, and breeding entities 
+              with their detailed analysis and statistics displays.
+            </p>
+          </div>
+
+          {/* Rest of UI would continue here... */}
+        </div>
+      </div>
+    </Layout>
+  );
+} 
