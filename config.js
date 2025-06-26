@@ -10,6 +10,7 @@ module.exports = {
     headless: process.env.NODE_ENV === 'production' ? true : true, // Always headless for cloud
     slowMo: process.env.NODE_ENV === 'production' ? 0 : 100,      // No slow mo in production
     timeout: 60000,   // 60 second timeout
+    protocolTimeout: process.env.NODE_ENV === 'production' ? 120000 : 60000, // 2 minutes in production, 1 minute locally
     args: process.env.NODE_ENV === 'production' ? [
       '--no-sandbox',
       '--disable-setuid-sandbox',

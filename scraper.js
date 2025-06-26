@@ -25,7 +25,8 @@ class TimeformScraper {
     this.browser = await puppeteer.launch({
       headless: config.puppeteer.headless,
       slowMo: config.puppeteer.slowMo,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: config.puppeteer.args,
+      protocolTimeout: config.puppeteer.protocolTimeout
     });
     
     this.page = await this.browser.newPage();
@@ -68,23 +69,29 @@ class TimeformScraper {
         document.querySelector(selector)?.click();
       }, signInSelector);
       
-      // Take screenshot and save HTML immediately after sign-in click
-      await this.page.screenshot({ path: 'login-step1-after-signin-click.png', fullPage: true });
-      const htmlAfterSignInClick = await this.page.content();
-      fs.writeFileSync('login-after-signin-click.html', htmlAfterSignInClick);
-      console.log('Page HTML after sign-in click saved to login-after-signin-click.html');
+      // Take screenshot and save HTML immediately after sign-in click (only in development)
+      if (process.env.NODE_ENV !== 'production') {
+        await this.page.screenshot({ path: 'login-step1-after-signin-click.png', fullPage: true });
+        const htmlAfterSignInClick = await this.page.content();
+        fs.writeFileSync('login-after-signin-click.html', htmlAfterSignInClick);
+        console.log('Page HTML after sign-in click saved to login-after-signin-click.html');
+      }
 
       // Wait for email input (assuming login form appears on the new login page)
       const emailSelector = 'input[id="EmailAddress"]';
       await this.page.waitForSelector(emailSelector, { timeout: config.puppeteer.timeout });
       await this.page.type(emailSelector, config.timeform.email);
-      await this.page.screenshot({ path: 'login-step2-after-email.png', fullPage: true });
+      if (process.env.NODE_ENV !== 'production') {
+        await this.page.screenshot({ path: 'login-step2-after-email.png', fullPage: true });
+      }
 
       // Wait for password input
       const passwordSelector = 'input[id="Password"]';
       await this.page.waitForSelector(passwordSelector, { timeout: config.puppeteer.timeout });
       await this.page.type(passwordSelector, config.timeform.password);
-      await this.page.screenshot({ path: 'login-step3-after-password.png', fullPage: true });
+      if (process.env.NODE_ENV !== 'production') {
+        await this.page.screenshot({ path: 'login-step3-after-password.png', fullPage: true });
+      }
 
       // Submit login form
       const submitSelector = 'input[type="submit"][value="Sign In"]';
@@ -100,7 +107,9 @@ class TimeformScraper {
 
     } catch (error) {
       console.error('❌ Login failed:', error.message);
-      await this.page.screenshot({ path: 'login-failed.png', fullPage: true });
+      if (process.env.NODE_ENV !== 'production') {
+        await this.page.screenshot({ path: 'login-failed.png', fullPage: true });
+      }
       throw error;
     }
   }
