@@ -294,14 +294,14 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
   try {
     // Get lifetime performance (cached)
     const cacheKey = `${jockeyId}_lifetime`;
-    let lifetimeStats = performanceCache.jockey_lifetime[cacheKey];
+    let lifetimeStats = performanceCache.jockey.lifetime[cacheKey];
     
     if (!lifetimeStats) {
       const lifetimeData = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses`, `Jockey ${jockeyName} lifetime stats`);
       
       if (lifetimeData && lifetimeData.summary) {
         lifetimeStats = `${lifetimeData.summary.runs},${lifetimeData.summary.wins},${lifetimeData.summary.win_percentage},${lifetimeData.summary.strike_rate}`;
-        performanceCache.jockey_lifetime[cacheKey] = lifetimeStats;
+        performanceCache.jockey.lifetime[cacheKey] = lifetimeStats;
         console.log(`🔥 Cached lifetime stats for jockey ${jockeyName}`);
         } else {
         lifetimeStats = '0,0,0.0,0.00';
@@ -313,7 +313,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     
     // Get 12-month results (cached)
     const twelveMonthCacheKey = `${jockeyId}_12month`;
-    let recent12MonthResults = performanceCache.jockey_12_months[twelveMonthCacheKey];
+    let recent12MonthResults = performanceCache.jockey.twelve_months[twelveMonthCacheKey];
     
     if (!recent12MonthResults) {
       const twelveMonthsAgo = new Date();
@@ -331,7 +331,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
           '0.00';
         
         recent12MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
-        performanceCache.jockey_12_months[twelveMonthCacheKey] = recent12MonthResults;
+        performanceCache.jockey.twelve_months[twelveMonthCacheKey] = recent12MonthResults;
         console.log(`🔥 Cached 12-month stats for jockey ${jockeyName}`);
               } else {
         recent12MonthResults = '0,0,0.0,0.00';
@@ -343,7 +343,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     
     // Get 3-month results (cached)
     const threeMonthCacheKey = `${jockeyId}_3month`;
-    let recent3MonthResults = performanceCache.jockey_3_months[threeMonthCacheKey];
+    let recent3MonthResults = performanceCache.jockey.three_months[threeMonthCacheKey];
     
     if (!recent3MonthResults) {
       const threeMonthsAgo = new Date();
@@ -361,7 +361,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
           '0.00';
         
         recent3MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
-        performanceCache.jockey_3_months[threeMonthCacheKey] = recent3MonthResults;
+        performanceCache.jockey.three_months[threeMonthCacheKey] = recent3MonthResults;
         console.log(`🔥 Cached 3-month stats for jockey ${jockeyName}`);
       } else {
         recent3MonthResults = '0,0,0.0,0.00';
