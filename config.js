@@ -9,7 +9,8 @@ module.exports = {
   puppeteer: {
     headless: process.env.NODE_ENV === 'production' ? true : true, // Always headless for cloud
     slowMo: process.env.NODE_ENV === 'production' ? 0 : 100,      // No slow mo in production
-    timeout: 60000,   // 60 second timeout
+    timeout: process.env.NODE_ENV === 'production' ? 120000 : 60000,   // 2 minutes in production, 1 minute locally
+    protocolTimeout: process.env.NODE_ENV === 'production' ? 180000 : 60000, // 3 minutes in production, 1 minute locally
     args: process.env.NODE_ENV === 'production' ? [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -18,7 +19,13 @@ module.exports = {
       '--no-first-run',
       '--no-zygote',
       '--single-process',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-web-security',
+      '--disable-features=VizDisplayCompositor',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--memory-pressure-off'
     ] : []
   },
   supabase: {

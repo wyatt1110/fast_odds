@@ -34,6 +34,7 @@ jobs:
       
     - name: Run timeform scraper
       env:
+        NODE_ENV: production
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         TZ: Europe/London

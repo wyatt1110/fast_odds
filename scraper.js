@@ -25,10 +25,15 @@ class TimeformScraper {
     this.browser = await puppeteer.launch({
       headless: config.puppeteer.headless,
       slowMo: config.puppeteer.slowMo,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: config.puppeteer.args,
+      protocolTimeout: config.puppeteer.protocolTimeout
     });
     
     this.page = await this.browser.newPage();
+    
+    // Set protocolTimeout on the page level as well
+    this.page.setDefaultTimeout(config.puppeteer.timeout);
+    this.page.setDefaultNavigationTimeout(config.puppeteer.timeout);
     
     // Set a realistic user agent
     await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -48,6 +53,7 @@ class TimeformScraper {
 
   async login() {
     console.log('🔐 Logging into Timeform...');
+    console.log(`DEBUG: NODE_ENV = ${process.env.NODE_ENV}`);
     
     try {
       // Navigate to racecards page directly for login
@@ -68,23 +74,35 @@ class TimeformScraper {
         document.querySelector(selector)?.click();
       }, signInSelector);
       
-      // Take screenshot and save HTML immediately after sign-in click
-      await this.page.screenshot({ path: 'login-step1-after-signin-click.png', fullPage: true });
-      const htmlAfterSignInClick = await this.page.content();
-      fs.writeFileSync('login-after-signin-click.html', htmlAfterSignInClick);
-      console.log('Page HTML after sign-in click saved to login-after-signin-click.html');
+      // Take screenshot and save HTML immediately after sign-in click (only in development)
+      const isProduction = process.env.NODE_ENV === 'production';
+      console.log(`DEBUG: isProduction = ${isProduction}, skipping screenshots in production`);
+      
+      if (!isProduction) {
+        console.log('Taking screenshot in development mode...');
+        await this.page.screenshot({ path: 'login-step1-after-signin-click.png', fullPage: true });
+        const htmlAfterSignInClick = await this.page.content();
+        fs.writeFileSync('login-after-signin-click.html', htmlAfterSignInClick);
+        console.log('Page HTML after sign-in click saved to login-after-signin-click.html');
+      }
 
       // Wait for email input (assuming login form appears on the new login page)
       const emailSelector = 'input[id="EmailAddress"]';
       await this.page.waitForSelector(emailSelector, { timeout: config.puppeteer.timeout });
       await this.page.type(emailSelector, config.timeform.email);
-      await this.page.screenshot({ path: 'login-step2-after-email.png', fullPage: true });
+      if (!isProduction) {
+        console.log('Taking email screenshot in development mode...');
+        await this.page.screenshot({ path: 'login-step2-after-email.png', fullPage: true });
+      }
 
       // Wait for password input
       const passwordSelector = 'input[id="Password"]';
       await this.page.waitForSelector(passwordSelector, { timeout: config.puppeteer.timeout });
       await this.page.type(passwordSelector, config.timeform.password);
-      await this.page.screenshot({ path: 'login-step3-after-password.png', fullPage: true });
+      if (!isProduction) {
+        console.log('Taking password screenshot in development mode...');
+        await this.page.screenshot({ path: 'login-step3-after-password.png', fullPage: true });
+      }
 
       // Submit login form
       const submitSelector = 'input[type="submit"][value="Sign In"]';
@@ -100,7 +118,15 @@ class TimeformScraper {
 
     } catch (error) {
       console.error('❌ Login failed:', error.message);
-      await this.page.screenshot({ path: 'login-failed.png', fullPage: true });
+      const isProduction = process.env.NODE_ENV === 'production';
+      if (!isProduction) {
+        console.log('Taking error screenshot in development mode...');
+        try {
+          await this.page.screenshot({ path: 'login-failed.png', fullPage: true });
+        } catch (screenshotError) {
+          console.error('Failed to take error screenshot:', screenshotError.message);
+        }
+      }
       throw error;
     }
   }
@@ -1078,7 +1104,7 @@ class TimeformScraper {
         }
       }
 
-      // Final fallback - try fuzzy matching without time
+      // Fallback - try fuzzy matching without time
       for (const courseName of courseVariations) {
         const { data, error } = await supabase
           .from('races')
@@ -1106,6 +1132,17 @@ class TimeformScraper {
             return bestMatch.race_id;
           }
         }
+      }
+
+      // Final fallback - use advanced fuzzy track name matching
+      const fuzzyMatchId = await this.fuzzyTrackMatch(
+        raceData.course, 
+        raceData.raceDate, 
+        raceData.raceTime
+      );
+      
+      if (fuzzyMatchId) {
+        return fuzzyMatchId;
       }
 
       return null;
@@ -1160,7 +1197,7 @@ class TimeformScraper {
     
     // Remove common suffixes/prefixes
     const cleaned = courseName
-      .replace(/\s*\([^)]*\)\s*/g, '') // Remove (IRE), (GER), etc.
+      .replace(/\s*\([^)]*\)\s*/g, '') // Remove (IRE), (GER), (AW), etc.
       .replace(/\s+PARK$/i, '') // Remove PARK suffix
       .replace(/\s+RACECOURSE$/i, '') // Remove RACECOURSE suffix
       .replace(/-ON-DEE$/i, '') // Handle Bangor-on-Dee
@@ -1172,6 +1209,15 @@ class TimeformScraper {
       variations.push(cleaned.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()));
     }
     
+    // Extract the main location name (first word) for fuzzy matching
+    // This helps with cases like "Stratford-on-Avon" -> "Stratford"
+    const mainLocation = courseName.split(/[\s-]+/)[0].trim();
+    if (mainLocation && mainLocation.length > 3 && mainLocation !== courseName) {
+      variations.push(mainLocation);
+      variations.push(mainLocation.toLowerCase());
+      variations.push(mainLocation.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()));
+    }
+    
     // Handle specific course name mappings
     const courseMap = {
       'NEWMARKET (JULY)': ['Newmarket', 'Newmarket July'],
@@ -1179,7 +1225,12 @@ class TimeformScraper {
       'HAYDOCK PARK': ['Haydock'],
       'BANGOR-ON-DEE': ['Bangor'],
       'DOWN ROYAL': ['Down Royal'],
-      'LIMERICK': ['Limerick']
+      'LIMERICK': ['Limerick'],
+      'CHELMSFORD CITY': ['Chelmsford', 'Chelmsford (AW)'],
+      'STRATFORD-ON-AVON': ['Stratford', 'Stratford Upon Avon'],
+      'NEWTON ABBOT': ['Newton Abbot'],
+      'SOUTHWELL': ['Southwell', 'Southwell (AW)'],
+      'WOLVERHAMPTON': ['Wolverhampton', 'Wolverhampton (AW)']
     };
     
     const upperCourseName = courseName.toUpperCase();
@@ -1187,7 +1238,137 @@ class TimeformScraper {
       variations.push(...courseMap[upperCourseName]);
     }
     
+    // Try to handle any track with "CITY" in the name
+    if (upperCourseName.includes(' CITY')) {
+      const withoutCity = upperCourseName.replace(' CITY', '');
+      variations.push(withoutCity);
+      variations.push(withoutCity.toLowerCase());
+      variations.push(withoutCity.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()));
+    }
+    
+    // Try to handle any track with "-ON-" in the name
+    if (upperCourseName.includes('-ON-')) {
+      const beforeOn = upperCourseName.split('-ON-')[0];
+      variations.push(beforeOn);
+      variations.push(beforeOn.toLowerCase());
+      variations.push(beforeOn.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()));
+    }
+    
     return [...new Set(variations)]; // Remove duplicates
+  }
+
+  // Calculate similarity between two strings (0-100%)
+  calculateStringSimilarity(str1, str2) {
+    if (!str1 || !str2) return 0;
+    
+    // Convert both strings to lowercase for case-insensitive comparison
+    const s1 = str1.toLowerCase();
+    const s2 = str2.toLowerCase();
+    
+    // If strings are identical, return 100%
+    if (s1 === s2) return 100;
+    
+    // Calculate Levenshtein distance
+    const track = Array(s2.length + 1).fill(null).map(() => 
+      Array(s1.length + 1).fill(null));
+    
+    for (let i = 0; i <= s1.length; i += 1) {
+      track[0][i] = i;
+    }
+    
+    for (let j = 0; j <= s2.length; j += 1) {
+      track[j][0] = j;
+    }
+    
+    for (let j = 1; j <= s2.length; j += 1) {
+      for (let i = 1; i <= s1.length; i += 1) {
+        const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+        track[j][i] = Math.min(
+          track[j][i - 1] + 1, // deletion
+          track[j - 1][i] + 1, // insertion
+          track[j - 1][i - 1] + indicator, // substitution
+        );
+      }
+    }
+    
+    // Calculate similarity as percentage (100% - normalized distance)
+    const maxLength = Math.max(s1.length, s2.length);
+    const distance = track[s2.length][s1.length];
+    return Math.round((1 - distance / maxLength) * 100);
+  }
+  
+  // Fuzzy track name matching as a fallback
+  async fuzzyTrackMatch(courseName, raceDate, raceTime) {
+    try {
+      console.log(`🔍 Attempting fuzzy track name matching for "${courseName}"...`);
+      
+      // Get all races for the specific date
+      const { data, error } = await supabase
+        .from('races')
+        .select('race_id, course, off_time')
+        .eq('race_date', raceDate)
+        .order('off_time', { ascending: true });
+      
+      if (error || !data || data.length === 0) {
+        console.log(`   ❌ No races found for date ${raceDate}`);
+        return null;
+      }
+      
+      // Extract the main location part (first word) of the course name
+      const mainLocation = courseName.split(/[\s-]+/)[0].trim().toLowerCase();
+      
+      // First try to find courses that contain the main location name
+      const locationMatches = data.filter(race => 
+        race.course.toLowerCase().includes(mainLocation)
+      );
+      
+      if (locationMatches.length > 0) {
+        console.log(`   ✅ Found ${locationMatches.length} potential matches by location name "${mainLocation}"`);
+        
+        // If we have location matches, find the closest time match
+        const timeFormats = this.generateTimeFormats(raceTime);
+        const timeMatch = locationMatches.find(race => 
+          timeFormats.includes(race.off_time)
+        );
+        
+        if (timeMatch) {
+          console.log(`   ✅ MATCH FOUND: "${courseName}" → "${timeMatch.course}" at ${timeMatch.off_time}`);
+          return timeMatch.race_id;
+        }
+        
+        // If no exact time match, return the first location match
+        console.log(`   ⚠️  No exact time match, using first location match: "${locationMatches[0].course}"`);
+        return locationMatches[0].race_id;
+      }
+      
+      // If no location matches, try fuzzy string matching on all courses for that day
+      console.log(`   🔍 No location matches, trying fuzzy string matching...`);
+      let bestMatch = null;
+      let highestSimilarity = 0;
+      
+      for (const race of data) {
+        // Calculate string similarity between course names
+        const similarity = this.calculateStringSimilarity(courseName, race.course);
+        
+        // Consider it a match if similarity is above 70%
+        if (similarity > highestSimilarity && similarity >= 70) {
+          highestSimilarity = similarity;
+          bestMatch = race;
+        }
+      }
+      
+      if (bestMatch) {
+        console.log(`   ✅ FUZZY MATCH: "${courseName}" → "${bestMatch.course}" (${highestSimilarity}% similar)`);
+        return bestMatch.race_id;
+      }
+      
+      console.log(`   ❌ No fuzzy matches found above 70% similarity threshold`);
+      return null;
+      
+    } catch (error) {
+      console.error('   ❌ Error in fuzzyTrackMatch:', error.message);
+      return null;
+    }
   }
 
   parseTimeToMinutes(timeString) {
