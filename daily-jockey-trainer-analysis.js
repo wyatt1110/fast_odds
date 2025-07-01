@@ -85,7 +85,7 @@ const entityCache = {
 };
 
 // Rate limiting configuration
-const RATE_LIMIT_DELAY = 8000; // 8 seconds between API calls (safer margin)
+const RATE_LIMIT_DELAY = 5000; // Reduced from 8000ms to 5000ms for faster processing
 const MAX_RETRIES = 5; // Increased retries for rate limit handling
 
 // Helper function to clean names (remove bracketed content)
@@ -363,6 +363,9 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
       performanceCache.stats.jockey_api_calls_saved++;
     }
     
+    // Initialize variable for trainer partnership calculation
+    let recent3MonthResults = [];
+    
     // Only make API call if we need either 12-month or 3-month data
     if (!useCache12Month || !useCache3Month) {
       // 2. Get recent results for 12-month and 3-month analysis (combined call with larger limit)
@@ -381,12 +384,14 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
           performanceCache.jockey.twelve_months[jockeyId] = analysis.twelve_months;
         }
         
+        // Always calculate recent3MonthResults for trainer partnership (even if 3-month stats are cached)
+        const threeMonthsAgoStr = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        recent3MonthResults = recentResults.results.filter(race => 
+          race.date >= threeMonthsAgoStr
+        );
+        
         if (!useCache3Month) {
-          // Calculate 3-month stats from the same dataset
-          const threeMonthsAgoStr = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-          const recent3MonthResults = recentResults.results.filter(race => 
-            race.date >= threeMonthsAgoStr
-          );
+          // Calculate 3-month stats from the filtered dataset
           const stats3Month = calculateStatsFromResults(recent3MonthResults, jockeyName);
           analysis.three_months = formatStats(stats3Month.rides, stats3Month.wins, stats3Month.win_percentage, stats3Month.profit_loss);
           console.log(`✅ 3 months: ${analysis.three_months}`);
@@ -394,39 +399,40 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
           // Cache for future use in this session
           performanceCache.jockey.three_months[jockeyId] = analysis.three_months;
         }
+      }
+    }
+    
+    // Calculate trainer partnership from recent results (avoid extra API call)
+    // Only if we have recent data and trainer ID
+    if (trainerId && recent3MonthResults.length > 0) {
+      let trainerRides = 0, trainerWins = 0, trainerPL = 0;
       
-        // Calculate trainer partnership from recent results (avoid extra API call)
-        if (trainerId && recent3MonthResults.length > 0) {
-          let trainerRides = 0, trainerWins = 0, trainerPL = 0;
+      recent3MonthResults.forEach(race => {
+        if (race.runners) {
+          const jockeyTrainerRuns = race.runners.filter(runner => 
+            runner.jockey && runner.jockey.toLowerCase().includes(jockeyName.toLowerCase()) &&
+            runner.trainer_id === trainerId
+          );
           
-          recent3MonthResults.forEach(race => {
-            if (race.runners) {
-              const jockeyTrainerRuns = race.runners.filter(runner => 
-                runner.jockey && runner.jockey.toLowerCase().includes(jockeyName.toLowerCase()) &&
-                runner.trainer_id === trainerId
-              );
-              
-              jockeyTrainerRuns.forEach(run => {
-                trainerRides++;
-                if (run.position === '1') trainerWins++;
-                if (run.position === '1' && run.sp_dec) {
-                  trainerPL += (parseFloat(run.sp_dec) - 1);
-                } else {
-                  trainerPL -= 1;
-                }
-              });
+          jockeyTrainerRuns.forEach(run => {
+            trainerRides++;
+            if (run.position === '1') trainerWins++;
+            if (run.position === '1' && run.sp_dec) {
+              trainerPL += (parseFloat(run.sp_dec) - 1);
+            } else {
+              trainerPL -= 1;
             }
           });
-          
-          analysis.trainer_3_months = formatStats(
-            trainerRides,
-            trainerWins,
-            trainerRides > 0 ? (trainerWins / trainerRides * 100) : 0,
-            trainerPL
-          );
-          console.log(`✅ Jockey/Trainer 3-month: ${analysis.trainer_3_months}`);
         }
-      }
+      });
+      
+      analysis.trainer_3_months = formatStats(
+        trainerRides,
+        trainerWins,
+        trainerRides > 0 ? (trainerWins / trainerRides * 100) : 0,
+        trainerPL
+      );
+      console.log(`✅ Jockey/Trainer 3-month: ${analysis.trainer_3_months}`);
     }
     
     // 3. Only make additional API calls for critical missing data
@@ -479,6 +485,16 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     console.error(`❌ Error analyzing jockey ${jockeyName}:`, error.message);
   }
   
+  // Ensure we always return the basic required fields, even if empty
+  const requiredFields = ['lifetime', 'twelve_months', 'three_months', 'trainer', 'trainer_3_months', 'course', 'owner'];
+  requiredFields.forEach(field => {
+    if (!analysis[field]) {
+      analysis[field] = formatStats(0, 0, 0, 0);
+      console.log(`⚠️  Setting default value for missing jockey field: ${field}`);
+    }
+  });
+  
+  console.log(`🎯 Final jockey analysis for ${jockeyName}:`, JSON.stringify(analysis, null, 2));
   return analysis;
 }
 
@@ -634,6 +650,16 @@ async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerI
     console.error(`❌ Error analyzing trainer ${trainerName}:`, error.message);
   }
   
+  // Ensure we always return the basic required fields, even if empty
+  const requiredFields = ['lifetime', 'twelve_months', 'three_months', 'jockey', 'jockey_3_months', 'course', 'owner'];
+  requiredFields.forEach(field => {
+    if (!analysis[field]) {
+      analysis[field] = formatStats(0, 0, 0, 0);
+      console.log(`⚠️  Setting default value for missing trainer field: ${field}`);
+    }
+  });
+  
+  console.log(`🎯 Final trainer analysis for ${trainerName}:`, JSON.stringify(analysis, null, 2));
   return analysis;
 }
 
@@ -672,6 +698,14 @@ function needsAnalysis(runner) {
 // Update runner with analysis data
 async function updateRunnerAnalysis(runnerId, jockeyAnalysis, trainerAnalysis) {
   try {
+    console.log(`\n💾 === UPDATING RUNNER ${runnerId} ===`);
+    console.log(`📊 Jockey analysis received:`, Object.keys(jockeyAnalysis).length, 'fields');
+    console.log(`📊 Trainer analysis received:`, Object.keys(trainerAnalysis).length, 'fields');
+    
+    // Show what data we're about to save
+    console.log(`📝 Jockey data to save:`, JSON.stringify(jockeyAnalysis, null, 2));
+    console.log(`📝 Trainer data to save:`, JSON.stringify(trainerAnalysis, null, 2));
+    
     const updateData = {
       // Jockey analysis
       jockey_lifetime: jockeyAnalysis.lifetime || null,
@@ -695,20 +729,34 @@ async function updateRunnerAnalysis(runnerId, jockeyAnalysis, trainerAnalysis) {
       updated_at: new Date().toISOString()
     };
     
-    const { error } = await supabase
+    console.log(`📋 Final update data:`, JSON.stringify(updateData, null, 2));
+    console.log(`🔄 Attempting Supabase update for runner ${runnerId}...`);
+    
+    const { data, error } = await supabase
       .from('runners')
       .update(updateData)
-      .eq('id', runnerId);
+      .eq('id', runnerId)
+      .select(); // Return the updated data to verify
     
     if (error) {
-      console.error(`Error updating runner ${runnerId}:`, error);
+      console.error(`❌ Supabase error for runner ${runnerId}:`, error);
+      console.error(`❌ Error details:`, JSON.stringify(error, null, 2));
       return false;
     }
     
-    console.log(`✅ Successfully updated runner ${runnerId} with analysis data`);
-    return true;
+    if (data && data.length > 0) {
+      console.log(`✅ Successfully updated runner ${runnerId}`);
+      console.log(`✅ Updated ${data.length} record(s)`);
+      console.log(`✅ Verification - updated data:`, JSON.stringify(data[0], null, 2));
+      return true;
+    } else {
+      console.error(`⚠️  Update completed but no data returned for runner ${runnerId}`);
+      console.error(`⚠️  This might indicate the runner ID doesn't exist`);
+      return false;
+    }
   } catch (error) {
-    console.error(`Error updating runner ${runnerId}:`, error.message);
+    console.error(`❌ Exception updating runner ${runnerId}:`, error.message);
+    console.error(`❌ Full error:`, error);
     return false;
   }
 }
@@ -719,6 +767,20 @@ async function processTodaysRunners() {
   console.log(`Processing runners for: ${getTodayDate()}\n`);
   
   try {
+    // Test Supabase connectivity first
+    console.log('🔗 Testing Supabase connectivity...');
+    const { data: testData, error: testError } = await supabase
+      .from('runners')
+      .select('id')
+      .limit(1);
+    
+    if (testError) {
+      console.error('❌ Supabase connectivity test failed:', testError);
+      console.error('❌ Cannot proceed without database access');
+      return;
+    }
+    console.log('✅ Supabase connectivity test passed');
+    
     // First get today's race IDs
     const { data: todayRaces, error: racesError } = await supabase
       .from('races')
@@ -910,7 +972,10 @@ async function processTodaysRunners() {
             ownerId,
             runner.age
           );
-          console.log(`✅ Jockey analysis complete:`, Object.keys(jockeyAnalysis).length, 'fields');
+          console.log(`✅ Jockey analysis complete: ${Object.keys(jockeyAnalysis).length} fields returned`);
+          console.log(`📊 Jockey analysis result:`, JSON.stringify(jockeyAnalysis, null, 2));
+        } else {
+          console.log(`⚠️  No jockey_id found for runner, skipping jockey analysis`);
         }
         
         // Analyze trainer
@@ -925,18 +990,23 @@ async function processTodaysRunners() {
             ownerId,
             runner.age
           );
-          console.log(`✅ Trainer analysis complete:`, Object.keys(trainerAnalysis).length, 'fields');
+          console.log(`✅ Trainer analysis complete: ${Object.keys(trainerAnalysis).length} fields returned`);
+          console.log(`📊 Trainer analysis result:`, JSON.stringify(trainerAnalysis, null, 2));
+        } else {
+          console.log(`⚠️  No trainer_id found for runner, skipping trainer analysis`);
         }
         
         // Update runner with analysis
-        console.log(`💾 Updating runner ${runner.id} with analysis data...`);
+        console.log(`💾 About to update runner ${runner.id} with analysis data...`);
+        console.log(`🎯 Has jockey data: ${Object.keys(jockeyAnalysis).length > 0}`);
+        console.log(`🎯 Has trainer data: ${Object.keys(trainerAnalysis).length > 0}`);
         
         const success = await updateRunnerAnalysis(runner.id, jockeyAnalysis, trainerAnalysis);
         if (success) {
           successCount++;
-          console.log(`✅ Runner ${runner.id} updated successfully`);
+          console.log(`✅ Runner ${runner.id} updated successfully (Total successful: ${successCount})`);
         } else {
-          console.log(`❌ Failed to update runner ${runner.id}`);
+          console.log(`❌ Failed to update runner ${runner.id} (Total failed: ${processedCount - successCount})`);
         }
         
       } catch (error) {
