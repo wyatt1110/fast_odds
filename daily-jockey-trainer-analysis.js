@@ -422,9 +422,10 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
 }
 
 // Trainer analysis function with caching
-console.log(`🔍 Analyzing trainer: ${trainerName} (ID: ${trainerId})`);
+async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerId, horseAge) {
+  console.log(`🔍 Analyzing trainer: ${trainerName} (ID: ${trainerId})`);
 
-try {
+  try {
   // Cached lifetime stats
   let lifetimeStats = '0,0,0.0,0.00';
   if (!performanceCache.trainer.lifetime[trainerId]) {
@@ -508,6 +509,7 @@ try {
 } catch (error) {
   console.error(`❌ Error analyzing trainer ${trainerName}:`, error.message);
   return null;
+}
 }
 
 // Check if runner needs analysis (has null or failed data) - IMPROVED VERSION
