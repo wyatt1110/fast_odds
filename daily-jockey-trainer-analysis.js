@@ -128,22 +128,22 @@ async function makeAPICall(endpoint, description) {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${API_KEY}`,
+          'Authorization': `Basic ${Buffer.from(`${API_USERNAME}:${API_PASSWORD}`).toString('base64')}`,
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
-        if (response.status === 429) {
+      if (response.status === 429) {
           // Rate limited - back off exponentially but faster
           const backoffTime = Math.min(2000 * attempt, 5000); // Max 5 second backoff
           console.log(`⏳ Rate limited, backing off for ${backoffTime}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffTime));
-          continue;
-        }
+        continue;
+      }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
       const callTime = Date.now() - startTime;
       console.log(`✅ API call successful (${callTime}ms): ${description || endpoint}`);
@@ -303,7 +303,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
         lifetimeStats = `${lifetimeData.summary.runs},${lifetimeData.summary.wins},${lifetimeData.summary.win_percentage},${lifetimeData.summary.strike_rate}`;
         performanceCache.jockey_lifetime[cacheKey] = lifetimeStats;
         console.log(`🔥 Cached lifetime stats for jockey ${jockeyName}`);
-      } else {
+        } else {
         lifetimeStats = '0,0,0.0,0.00';
         console.log(`⚠️  No lifetime data found for jockey ${jockeyName}`);
       }
@@ -333,7 +333,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
         recent12MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
         performanceCache.jockey_12_months[twelveMonthCacheKey] = recent12MonthResults;
         console.log(`🔥 Cached 12-month stats for jockey ${jockeyName}`);
-      } else {
+              } else {
         recent12MonthResults = '0,0,0.0,0.00';
         console.log(`⚠️  No 12-month data found for jockey ${jockeyName}`);
       }
@@ -436,7 +436,7 @@ async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerI
       performanceCache.trainer.lifetime[trainerId] = lifetimeStats;
       console.log(`🔥 Cached lifetime stats for trainer ${trainerName}`);
     }
-  } else {
+        } else {
     lifetimeStats = performanceCache.trainer.lifetime[trainerId];
     console.log(`🔥 Using cached lifetime stats for trainer ${trainerName}`);
   }
@@ -479,16 +479,16 @@ async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerI
   
   // Variable data - trainer/jockey partnerships
   let trainerJockeyData = '0,0,0.0,0.00';
-  if (jockeyId) {
+    if (jockeyId) {
     try {
       const jockeyData = await makeAPICall(`/trainers/${trainerId}/analysis/jockeys`, `Trainer ${trainerName} jockey partnerships`);
       if (jockeyData && jockeyData.length > 0) {
         const jockeyMatch = jockeyData.find(j => String(j.jockey_id) === String(jockeyId));
-        if (jockeyMatch) {
+          if (jockeyMatch) {
           trainerJockeyData = `${jockeyMatch.runs},${jockeyMatch.wins},${jockeyMatch.win_percentage},${jockeyMatch.strike_rate || jockeyMatch.avg_odds || '0.00'}`;
+          }
         }
-      }
-    } catch (error) {
+      } catch (error) {
       console.log(`⚠️  Error fetching trainer-jockey data: ${error.message}`);
     }
   }
@@ -506,10 +506,10 @@ async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerI
   
   return analysis;
   
-} catch (error) {
-  console.error(`❌ Error analyzing trainer ${trainerName}:`, error.message);
+  } catch (error) {
+    console.error(`❌ Error analyzing trainer ${trainerName}:`, error.message);
   return null;
-}
+  }
 }
 
 // Check if runner needs analysis (has null or failed data) - IMPROVED VERSION
@@ -541,7 +541,7 @@ function needsAnalysis(runner) {
   
   if (totalMissingCore >= 2) {
     console.log(`🎯 Runner ${runner.horse_name} needs analysis: ${totalMissingCore} core fields missing`);
-    return true;
+      return true;
   }
   
   return false;
@@ -600,7 +600,7 @@ async function updateRunnerAnalysis(runnerId, jockeyAnalysis, trainerAnalysis) {
       console.log(`✅ Successfully updated runner ${runnerId}`);
       console.log(`✅ Updated ${data.length} record(s)`);
       console.log(`✅ Verification - updated data:`, JSON.stringify(data[0], null, 2));
-      return true;
+    return true;
     } else {
       console.error(`⚠️  Update completed but no data returned for runner ${runnerId}`);
       console.error(`⚠️  This might indicate the runner ID doesn't exist`);
@@ -767,13 +767,13 @@ async function processTodaysRunners() {
     const estimatedCalls = uniqueJockeyCount * 2 + uniqueTrainerCount * 2 + runnersNeedingAnalysis.length * 2;
     const estimatedMinutes = Math.ceil((estimatedCalls * RATE_LIMIT_DELAY) / 60000);
     console.log(`⏱️  Estimated completion time with optimization: ~${estimatedMinutes} minutes (down from ${Math.ceil((runnersNeedingAnalysis.length * 6 * RATE_LIMIT_DELAY) / 60000)} minutes)\n`);
-    
-    // Process each runner that needs analysis
-    let processedCount = 0;
-    let successCount = 0;
-    
+  
+  // Process each runner that needs analysis
+  let processedCount = 0;
+  let successCount = 0;
+  
     // Process runners by jockey_id to maximize cache efficiency
-    for (const runner of runnersNeedingAnalysis) {
+  for (const runner of runnersNeedingAnalysis) {
       const runnerStartTime = Date.now();
       processedCount++;
       console.log(`\n=== Processing Runner ${processedCount}/${runnersNeedingAnalysis.length} ===`);
@@ -922,4 +922,4 @@ module.exports = {
   analyzeTrainer,
   needsAnalysis,
   processTodaysRunners
-};
+}; 
