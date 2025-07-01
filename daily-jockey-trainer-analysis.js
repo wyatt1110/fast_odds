@@ -85,8 +85,8 @@ const entityCache = {
 };
 
 // Rate limiting configuration
-const RATE_LIMIT_DELAY = 5000; // Reduced from 8000ms to 5000ms for faster processing
-const MAX_RETRIES = 5; // Increased retries for rate limit handling
+const RATE_LIMIT_DELAY = 1000; // Reduced to 1 second - API can handle this easily with our caching
+const MAX_RETRIES = 3; // Reduced retries since we have good caching
 
 // Helper function to clean names (remove bracketed content)
 function cleanName(name) {
@@ -113,60 +113,53 @@ function formatStats(runs, wins, winPercentage, profitLoss) {
   return `${runs_val},${wins_val},${winPct.toFixed(1)},${pl.toFixed(2)}`;
 }
 
-// Improved API call function with better rate limiting
-async function makeAPICall(endpoint, retries = MAX_RETRIES) {
-  // Wait between API calls to respect rate limits
-  await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
+// Helper function to make API calls with retry logic
+async function makeAPICall(endpoint, description) {
+  const startTime = Date.now();
+  console.log(`🌐 Making API call to: ${endpoint} (attempt 1/${MAX_RETRIES})`);
   
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      console.log(`Making API call to: ${endpoint} (attempt ${attempt}/${retries})`);
-      console.log(`Using API credentials: ${API_USERNAME ? 'USERNAME_SET' : 'NO_USERNAME'} / ${API_PASSWORD ? 'PASSWORD_SET' : 'NO_PASSWORD'}`);
+      // Add rate limiting delay before API call (but not on retries)
+      if (attempt === 1) {
+        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
+      }
       
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'GET',
         headers: {
-          'Authorization': `Basic ${Buffer.from(`${API_USERNAME}:${API_PASSWORD}`).toString('base64')}`,
+          'Authorization': `Bearer ${API_KEY}`,
           'Content-Type': 'application/json'
-        },
-        timeout: 30000 // 30 second timeout
+        }
       });
-
-      if (response.status === 429) {
-        // Rate limited - exponential backoff
-        const retryDelay = Math.min(15000 * attempt, 60000); // Up to 60 seconds
-        console.log(`⚠️  Rate limited, retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${retries})`);
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-        continue;
-      }
-
-      if (response.status === 401) {
-        console.error(`❌ Authentication failed (401) - check API credentials`);
-        console.error(`❌ API Response: ${response.status} ${response.statusText}`);
-        throw new Error(`API call failed: ${response.status} ${response.statusText}`);
-      }
-
-      if (!response.ok) {
-        console.error(`❌ API call failed: ${response.status} ${response.statusText}`);
-        const responseText = await response.text();
-        console.error(`❌ Response body: ${responseText}`);
-        throw new Error(`API call failed: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log(`✅ API call successful`);
-      return data;
-    } catch (error) {
-      console.error(`❌ API call failed for ${endpoint} (attempt ${attempt}):`, error.message);
       
-      if (attempt === retries) {
-        console.error(`🚫 Max retries (${retries}) exceeded for ${endpoint}`);
+      if (!response.ok) {
+        if (response.status === 429) {
+          // Rate limited - back off exponentially but faster
+          const backoffTime = Math.min(2000 * attempt, 5000); // Max 5 second backoff
+          console.log(`⏳ Rate limited, backing off for ${backoffTime}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          continue;
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      const callTime = Date.now() - startTime;
+      console.log(`✅ API call successful (${callTime}ms): ${description || endpoint}`);
+      return data;
+      
+    } catch (error) {
+      const callTime = Date.now() - startTime;
+      console.log(`❌ API call failed (attempt ${attempt}/${MAX_RETRIES}, ${callTime}ms): ${error.message}`);
+      
+      if (attempt === MAX_RETRIES) {
+        console.log(`💥 All ${MAX_RETRIES} attempts failed for ${endpoint}`);
         throw error;
       }
       
-      // Progressive retry delay
-      const retryDelay = Math.min(8000 * attempt, 30000);
-      console.log(`⏳ Retrying in ${retryDelay / 1000}s...`);
-      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      // Small delay before retry
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 }
@@ -202,23 +195,25 @@ async function searchEntityIdCached(entityType, name) {
   
   try {
     console.log(`🔍 Searching for ${entityType}: ${name}`);
-    const searchResult = await makeAPICall(`/${entityType}/search?name=${encodeURIComponent(cleanedName)}`);
+    const searchResult = await makeAPICall(`/${entityType}/search?name=${encodeURIComponent(cleanedName)}`, `Search ${entityType} "${cleanedName}"`);
     
-    if (searchResult?.search_results?.length > 0) {
-      const entity = searchResult.search_results[0];
-      console.log(`✅ Found ${entityType}: ${entity.name} (ID: ${entity.id}) - NEW DISCOVERY!`);
+    if (searchResult && searchResult.length > 0) {
+      // Find the exact match
+      const exactMatch = searchResult.find(entity => 
+        cleanName(entity.name).toLowerCase() === cleanedName.toLowerCase()
+      );
       
-      // Cache in both session and persistent cache
-      entityCache[entityType].set(cacheKey, entity.id);
-      persistentCache[entityType][cacheKey] = entity.id;
-      
-      // Save to file immediately for persistence
-      savePersistentCache(persistentCache);
-      
-      return entity.id;
+      if (exactMatch) {
+        console.log(`✅ Found ${entityType} ID for "${name}": ${exactMatch.id}`);
+        entityCache[entityType].set(cacheKey, exactMatch.id);
+        return exactMatch.id;
+      } else {
+        console.log(`⚠️  No exact match found for ${entityType} "${name}", found: ${searchResult.map(e => e.name).join(', ')}`);
+      }
+    } else {
+      console.log(`⚠️  No results found for ${entityType} "${name}"`);
     }
     
-    console.log(`❌ No ${entityType} found for: ${name}`);
     // Cache null results to avoid repeated searches (session only)
     entityCache[entityType].set(cacheKey, null);
     return null;
@@ -297,399 +292,254 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
   const today = new Date().toISOString().split('T')[0];
   
   try {
-    // Check cache for lifetime stats first
-    if (performanceCache.jockey.lifetime[jockeyId]) {
-      analysis.lifetime = performanceCache.jockey.lifetime[jockeyId];
-      console.log(`🔥 Using cached lifetime stats for jockey ${jockeyName}`);
-      performanceCache.stats.jockey_api_calls_saved++;
+    // Get lifetime performance (cached)
+    const cacheKey = `${jockeyId}_lifetime`;
+    let lifetimeStats = performanceCache.jockey_lifetime[cacheKey];
+    
+    if (!lifetimeStats) {
+      const lifetimeData = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses`, `Jockey ${jockeyName} lifetime stats`);
+      
+      if (lifetimeData && lifetimeData.summary) {
+        lifetimeStats = `${lifetimeData.summary.runs},${lifetimeData.summary.wins},${lifetimeData.summary.win_percentage},${lifetimeData.summary.strike_rate}`;
+        performanceCache.jockey_lifetime[cacheKey] = lifetimeStats;
+        console.log(`🔥 Cached lifetime stats for jockey ${jockeyName}`);
+      } else {
+        lifetimeStats = '0,0,0.0,0.00';
+        console.log(`⚠️  No lifetime data found for jockey ${jockeyName}`);
+      }
     } else {
-      // 1. Get lifetime stats from courses analysis (this gives us comprehensive data)
-      console.log('📊 Getting jockey lifetime stats...');
-      const lifetimeData = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses`);
-      
-      if (lifetimeData && lifetimeData.courses) {
-        const totalRides = lifetimeData.total_rides || 0;
-        const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-        const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
-        
-        analysis.lifetime = formatStats(
-          totalRides,
-          totalWins,
-          totalRides > 0 ? (totalWins / totalRides * 100) : 0,
-          totalPL
-        );
-        console.log(`✅ Lifetime: ${analysis.lifetime}`);
-        
-        // Cache the lifetime stats for future use in this session
-        performanceCache.jockey.lifetime[jockeyId] = analysis.lifetime;
-        
-        // Extract course-specific data from lifetime stats (avoid extra API call)
-        if (courseId) {
-          const courseMatch = lifetimeData.courses.find(c => {
-            if (!c.course) return false;
-            const cleanCourseName = cleanName(c.course);
-            const cleanTargetCourse = cleanName(courseId);
-            return cleanCourseName.toLowerCase() === cleanTargetCourse.toLowerCase();
-          });
-          
-          if (courseMatch) {
-            analysis.course = formatStats(
-              courseMatch.rides || 0,
-              courseMatch['1st'] || 0,
-              courseMatch['win_%'] ? courseMatch['win_%'] * 100 : 0,
-              parseFloat(courseMatch['1_pl'] || 0)
-            );
-            console.log(`✅ Jockey/Course (${courseMatch.course}): ${analysis.course}`);
-          } else {
-            analysis.course = formatStats(0, 0, 0, 0);
-          }
-        }
-      }
+      console.log(`🔥 Using cached lifetime stats for jockey ${jockeyName}`);
     }
     
-    // Check cache for recent results data (used for both 12-month and 3-month)
-    const useCache12Month = performanceCache.jockey.twelve_months[jockeyId] !== undefined;
-    const useCache3Month = performanceCache.jockey.three_months[jockeyId] !== undefined;
+    // Get 12-month results (cached)
+    const twelveMonthCacheKey = `${jockeyId}_12month`;
+    let recent12MonthResults = performanceCache.jockey_12_months[twelveMonthCacheKey];
     
-    if (useCache12Month) {
-      analysis.twelve_months = performanceCache.jockey.twelve_months[jockeyId];
+    if (!recent12MonthResults) {
+      const twelveMonthsAgo = new Date();
+      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+      const twelveMonthsAgoStr = twelveMonthsAgo.toISOString().split('T')[0];
+      const today = new Date().toISOString().split('T')[0];
+      
+      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=50`, `Jockey ${jockeyName} 12-month results`);
+      
+      if (recentResults && recentResults.length > 0) {
+        const wins = recentResults.filter(result => result.finishing_position === 1).length;
+        const winPercentage = ((wins / recentResults.length) * 100).toFixed(2);
+        const avgOdds = recentResults.length > 0 ? 
+          (recentResults.reduce((sum, r) => sum + (r.starting_price_decimal || 0), 0) / recentResults.length).toFixed(2) : 
+          '0.00';
+        
+        recent12MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
+        performanceCache.jockey_12_months[twelveMonthCacheKey] = recent12MonthResults;
+        console.log(`🔥 Cached 12-month stats for jockey ${jockeyName}`);
+      } else {
+        recent12MonthResults = '0,0,0.0,0.00';
+        console.log(`⚠️  No 12-month data found for jockey ${jockeyName}`);
+      }
+    } else {
       console.log(`🔥 Using cached 12-month stats for jockey ${jockeyName}`);
-      performanceCache.stats.jockey_api_calls_saved++;
     }
     
-    if (useCache3Month) {
-      analysis.three_months = performanceCache.jockey.three_months[jockeyId];
+    // Get 3-month results (cached)
+    const threeMonthCacheKey = `${jockeyId}_3month`;
+    let recent3MonthResults = performanceCache.jockey_3_months[threeMonthCacheKey];
+    
+    if (!recent3MonthResults) {
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+      const threeMonthsAgoStr = threeMonthsAgo.toISOString().split('T')[0];
+      const today = new Date().toISOString().split('T')[0];
+      
+      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${threeMonthsAgoStr}&end_date=${today}&limit=50`, `Jockey ${jockeyName} 3-month results`);
+      
+      if (recentResults && recentResults.length > 0) {
+        const wins = recentResults.filter(result => result.finishing_position === 1).length;
+        const winPercentage = ((wins / recentResults.length) * 100).toFixed(2);
+        const avgOdds = recentResults.length > 0 ? 
+          (recentResults.reduce((sum, r) => sum + (r.starting_price_decimal || 0), 0) / recentResults.length).toFixed(2) : 
+          '0.00';
+        
+        recent3MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
+        performanceCache.jockey_3_months[threeMonthCacheKey] = recent3MonthResults;
+        console.log(`🔥 Cached 3-month stats for jockey ${jockeyName}`);
+      } else {
+        recent3MonthResults = '0,0,0.0,0.00';
+        console.log(`⚠️  No 3-month data found for jockey ${jockeyName}`);
+      }
+    } else {
       console.log(`🔥 Using cached 3-month stats for jockey ${jockeyName}`);
-      performanceCache.stats.jockey_api_calls_saved++;
     }
     
-    // Initialize variable for trainer partnership calculation
-    let recent3MonthResults = [];
-    
-    // Only make API call if we need either 12-month or 3-month data
-    if (!useCache12Month || !useCache3Month) {
-      // 2. Get recent results for 12-month and 3-month analysis (combined call with larger limit)
-      console.log('📈 Getting jockey recent results...');
-      const twelveMonthsAgoStr = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=50`);
-      
-      if (recentResults && recentResults.results) {
-        if (!useCache12Month) {
-          // Calculate 12-month stats
-          const stats12Month = calculateStatsFromResults(recentResults.results, jockeyName);
-          analysis.twelve_months = formatStats(stats12Month.rides, stats12Month.wins, stats12Month.win_percentage, stats12Month.profit_loss);
-          console.log(`✅ 12 months: ${analysis.twelve_months}`);
-          
-          // Cache for future use in this session
-          performanceCache.jockey.twelve_months[jockeyId] = analysis.twelve_months;
-        }
-        
-        // Always calculate recent3MonthResults for trainer partnership (even if 3-month stats are cached)
-        const threeMonthsAgoStr = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        recent3MonthResults = recentResults.results.filter(race => 
-          race.date >= threeMonthsAgoStr
-        );
-        
-        if (!useCache3Month) {
-          // Calculate 3-month stats from the filtered dataset
-          const stats3Month = calculateStatsFromResults(recent3MonthResults, jockeyName);
-          analysis.three_months = formatStats(stats3Month.rides, stats3Month.wins, stats3Month.win_percentage, stats3Month.profit_loss);
-          console.log(`✅ 3 months: ${analysis.three_months}`);
-          
-          // Cache for future use in this session
-          performanceCache.jockey.three_months[jockeyId] = analysis.three_months;
-        }
-      }
-    }
-    
-    // Calculate trainer partnership from recent results (avoid extra API call)
-    // Only if we have recent data and trainer ID
-    if (trainerId && recent3MonthResults.length > 0) {
-      let trainerRides = 0, trainerWins = 0, trainerPL = 0;
-      
-      recent3MonthResults.forEach(race => {
-        if (race.runners) {
-          const jockeyTrainerRuns = race.runners.filter(runner => 
-            runner.jockey && runner.jockey.toLowerCase().includes(jockeyName.toLowerCase()) &&
-            runner.trainer_id === trainerId
-          );
-          
-          jockeyTrainerRuns.forEach(run => {
-            trainerRides++;
-            if (run.position === '1') trainerWins++;
-            if (run.position === '1' && run.sp_dec) {
-              trainerPL += (parseFloat(run.sp_dec) - 1);
-            } else {
-              trainerPL -= 1;
-            }
-          });
-        }
-      });
-      
-      analysis.trainer_3_months = formatStats(
-        trainerRides,
-        trainerWins,
-        trainerRides > 0 ? (trainerWins / trainerRides * 100) : 0,
-        trainerPL
-      );
-      console.log(`✅ Jockey/Trainer 3-month: ${analysis.trainer_3_months}`);
-    }
-    
-    // 3. Only make additional API calls for critical missing data
-    if (trainerId && !analysis.trainer) {
-      console.log('📊 Getting jockey/trainer partnership stats...');
+    // Variable data - always fetch (partnership specific)
+    let jockeyTrainerData = '0,0,0.0,0.00';
+    if (trainerId) {
       try {
-        const trainerData = await makeAPICall(`/jockeys/${jockeyId}/analysis/trainers`);
-        if (trainerData?.trainers?.length > 0) {
-          const trainerMatch = trainerData.trainers.find(t => t.trainer_id === trainerId);
-          if (trainerMatch) {
-            analysis.trainer = formatStats(
-              trainerMatch.rides || 0,
-              trainerMatch['1st'] || 0,
-              trainerMatch['win_%'] ? trainerMatch['win_%'] * 100 : 0,
-              parseFloat(trainerMatch['1_pl'] || 0)
-            );
-            console.log(`✅ Jockey/Trainer: ${analysis.trainer}`);
+        const trainerData = await makeAPICall(`/jockeys/${jockeyId}/analysis/trainers`, `Jockey ${jockeyName} trainer partnerships`);
+        if (trainerData && trainerData.length > 0) {
+          const specificTrainerData = trainerData.find(t => String(t.trainer_id) === String(trainerId));
+          if (specificTrainerData) {
+            jockeyTrainerData = `${specificTrainerData.runs},${specificTrainerData.wins},${specificTrainerData.win_percentage},${specificTrainerData.strike_rate || specificTrainerData.avg_odds || '0.00'}`;
           }
         }
       } catch (error) {
-        console.error(`⚠️  Could not get jockey/trainer data: ${error.message}`);
-        analysis.trainer = formatStats(0, 0, 0, 0);
+        console.log(`⚠️  Error fetching jockey-trainer data: ${error.message}`);
       }
     }
     
-    // 4. Owner partnership (only if critically needed)
+    // Variable data - jockey/owner partnerships
+    let jockeyOwnerData = '0,0,0.0,0.00';
     if (ownerId) {
-      console.log('📊 Getting jockey/owner partnership stats...');
       try {
-        const ownerData = await makeAPICall(`/jockeys/${jockeyId}/analysis/owners`);
-        if (ownerData?.owners?.length > 0) {
-          const ownerMatch = ownerData.owners.find(o => o.owner_id === ownerId);
-          if (ownerMatch) {
-            analysis.owner = formatStats(
-              ownerMatch.rides || 0,
-              ownerMatch['1st'] || 0,
-              ownerMatch['win_%'] ? ownerMatch['win_%'] * 100 : 0,
-              parseFloat(ownerMatch['1_pl'] || 0)
-            );
-            console.log(`✅ Jockey/Owner: ${analysis.owner}`);
+        const ownerData = await makeAPICall(`/jockeys/${jockeyId}/analysis/owners`, `Jockey ${jockeyName} owner partnerships`);
+        if (ownerData && ownerData.length > 0) {
+          const specificOwnerData = ownerData.find(o => String(o.owner_id) === String(ownerId));
+          if (specificOwnerData) {
+            jockeyOwnerData = `${specificOwnerData.runs},${specificOwnerData.wins},${specificOwnerData.win_percentage},${specificOwnerData.strike_rate || specificOwnerData.avg_odds || '0.00'}`;
           }
         }
       } catch (error) {
-        console.error(`⚠️  Could not get jockey/owner data: ${error.message}`);
-        analysis.owner = formatStats(0, 0, 0, 0);
+        console.log(`⚠️  Error fetching jockey-owner data: ${error.message}`);
       }
     }
     
+    // Set default values using the new simplified format
+    const analysis = {
+      lifetime: lifetimeStats || '0,0,0.0,0.00',
+      twelve_months: recent12MonthResults || '0,0,0.0,0.00', 
+      three_months: recent3MonthResults || '0,0,0.0,0.00',
+      trainer: jockeyTrainerData || '0,0,0.0,0.00',
+      trainer_3_months: '0,0,0.0,0.00', // Will be calculated if needed
+      course: '0,0,0.0,0.00',           // Will be calculated if needed
+      owner: jockeyOwnerData || '0,0,0.0,0.00'
+    };
+    
+    return analysis;
   } catch (error) {
     console.error(`❌ Error analyzing jockey ${jockeyName}:`, error.message);
+    return null;
   }
-  
-  // Ensure we always return the basic required fields, even if empty
-  const requiredFields = ['lifetime', 'twelve_months', 'three_months', 'trainer', 'trainer_3_months', 'course', 'owner'];
-  requiredFields.forEach(field => {
-    if (!analysis[field]) {
-      analysis[field] = formatStats(0, 0, 0, 0);
-      console.log(`⚠️  Setting default value for missing jockey field: ${field}`);
-    }
-  });
-  
-  console.log(`🎯 Final jockey analysis for ${jockeyName}:`, JSON.stringify(analysis, null, 2));
-  return analysis;
 }
 
-// Optimized trainer analysis with reduced API calls
-async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerId, horseAge) {
-  console.log(`\n🎯 Analyzing Trainer: ${trainerName} (${trainerId})`);
-  
-  const analysis = {};
-  const today = new Date().toISOString().split('T')[0];
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-  
-  try {
-    // Check cache for lifetime stats first
-    if (performanceCache.trainer.lifetime[trainerId]) {
-      analysis.lifetime = performanceCache.trainer.lifetime[trainerId];
-      console.log(`🔥 Using cached lifetime stats for trainer ${trainerName}`);
-      performanceCache.stats.trainer_api_calls_saved++;
-    } else {
-      // 1. Get comprehensive lifetime stats
-      console.log('📊 Getting trainer lifetime stats...');
-      const lifetimeData = await makeAPICall(`/trainers/${trainerId}/analysis/courses`);
-      
-      if (lifetimeData && lifetimeData.courses) {
-        const totalRunners = lifetimeData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
-        const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-        const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
-        
-        analysis.lifetime = formatStats(
-          totalRunners,
-          totalWins,
-          totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
-          totalPL
-        );
-        console.log(`✅ Lifetime: ${analysis.lifetime}`);
-        
-        // Cache the lifetime stats for future use in this session
-        performanceCache.trainer.lifetime[trainerId] = analysis.lifetime;
-        
-        // Extract course-specific data from lifetime stats
-        if (courseId) {
-          const courseMatch = lifetimeData.courses.find(c => {
-            if (!c.course) return false;
-            const cleanCourseName = cleanName(c.course);
-            const cleanTargetCourse = cleanName(courseId);
-            return cleanCourseName.toLowerCase() === cleanTargetCourse.toLowerCase();
-          });
-          
-          if (courseMatch) {
-            analysis.course = formatStats(
-              courseMatch.runners || 0,
-              courseMatch['1st'] || 0,
-              courseMatch['win_%'] ? courseMatch['win_%'] * 100 : 0,
-              parseFloat(courseMatch['1_pl'] || 0)
-            );
-            console.log(`✅ Trainer/Course (${courseMatch.course}): ${analysis.course}`);
-          } else {
-            analysis.course = formatStats(0, 0, 0, 0);
-          }
-        }
-      }
-    }
+// Trainer analysis function with caching
+console.log(`🔍 Analyzing trainer: ${trainerName} (ID: ${trainerId})`);
+
+try {
+  // Cached lifetime stats
+  let lifetimeStats = '0,0,0.0,0.00';
+  if (!performanceCache.trainer.lifetime[trainerId]) {
+    const lifetimeData = await makeAPICall(`/trainers/${trainerId}/analysis/courses`, `Trainer ${trainerName} lifetime stats`);
     
-    // Check cache for 12-month stats
-    if (performanceCache.trainer.twelve_months[trainerId]) {
-      analysis.twelve_months = performanceCache.trainer.twelve_months[trainerId];
-      console.log(`🔥 Using cached 12-month stats for trainer ${trainerName}`);
-      performanceCache.stats.trainer_api_calls_saved++;
-    } else {
-      // 2. Get time-specific data with single calls
-      console.log('📈 Getting trainer 12-month stats...');
-      try {
-        const twelveMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${twelveMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`);
-        if (twelveMonthData && twelveMonthData.courses) {
-          const totalRunners = twelveMonthData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
-          const totalWins = twelveMonthData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-          const totalPL = twelveMonthData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
-          
-          analysis.twelve_months = formatStats(
-            totalRunners,
-            totalWins,
-            totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
-            totalPL
-          );
-          console.log(`✅ 12 months: ${analysis.twelve_months}`);
-          
-          // Cache for future use in this session
-          performanceCache.trainer.twelve_months[trainerId] = analysis.twelve_months;
-        }
-      } catch (error) {
-        console.error(`⚠️  Could not get trainer 12-month data: ${error.message}`);
-        analysis.twelve_months = formatStats(0, 0, 0, 0);
-      }
+    if (lifetimeData && lifetimeData.summary) {
+      lifetimeStats = `${lifetimeData.summary.runs},${lifetimeData.summary.wins},${lifetimeData.summary.win_percentage},${lifetimeData.summary.strike_rate}`;
+      performanceCache.trainer.lifetime[trainerId] = lifetimeStats;
+      console.log(`🔥 Cached lifetime stats for trainer ${trainerName}`);
     }
-    
-    // Check cache for 3-month stats
-    if (performanceCache.trainer.three_months[trainerId]) {
-      analysis.three_months = performanceCache.trainer.three_months[trainerId];
-      console.log(`🔥 Using cached 3-month stats for trainer ${trainerName}`);
-      performanceCache.stats.trainer_api_calls_saved++;
-    } else {
-      console.log('📈 Getting trainer 3-month stats...');
-      try {
-        const threeMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${threeMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`);
-        if (threeMonthData && threeMonthData.courses) {
-          const totalRunners = threeMonthData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
-          const totalWins = threeMonthData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-          const totalPL = threeMonthData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
-          
-          analysis.three_months = formatStats(
-            totalRunners,
-            totalWins,
-            totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
-            totalPL
-          );
-          console.log(`✅ 3 months: ${analysis.three_months}`);
-          
-          // Cache for future use in this session
-          performanceCache.trainer.three_months[trainerId] = analysis.three_months;
-        }
-      } catch (error) {
-        console.error(`⚠️  Could not get trainer 3-month data: ${error.message}`);
-        analysis.three_months = formatStats(0, 0, 0, 0);
-      }
-    }
-    
-    // 3. Only get partnership data if critical
-    if (jockeyId) {
-      console.log('📊 Getting trainer/jockey partnership stats...');
-      try {
-        const jockeyData = await makeAPICall(`/trainers/${trainerId}/analysis/jockeys`);
-        if (jockeyData?.jockeys?.length > 0) {
-          const jockeyMatch = jockeyData.jockeys.find(j => j.jockey_id === jockeyId);
-          if (jockeyMatch) {
-            analysis.jockey = formatStats(
-              jockeyMatch.runners || 0,
-              jockeyMatch['1st'] || 0,
-              jockeyMatch['win_%'] ? jockeyMatch['win_%'] * 100 : 0,
-              parseFloat(jockeyMatch['1_pl'] || 0)
-            );
-            console.log(`✅ Trainer/Jockey: ${analysis.jockey}`);
-          }
-        }
-      } catch (error) {
-        console.error(`⚠️  Could not get trainer/jockey data: ${error.message}`);
-        analysis.jockey = formatStats(0, 0, 0, 0);
-      }
-    }
-    
-  } catch (error) {
-    console.error(`❌ Error analyzing trainer ${trainerName}:`, error.message);
+  } else {
+    lifetimeStats = performanceCache.trainer.lifetime[trainerId];
+    console.log(`🔥 Using cached lifetime stats for trainer ${trainerName}`);
   }
   
-  // Ensure we always return the basic required fields, even if empty
-  const requiredFields = ['lifetime', 'twelve_months', 'three_months', 'jockey', 'jockey_3_months', 'course', 'owner'];
-  requiredFields.forEach(field => {
-    if (!analysis[field]) {
-      analysis[field] = formatStats(0, 0, 0, 0);
-      console.log(`⚠️  Setting default value for missing trainer field: ${field}`);
+  // Cached 12-month stats
+  let twelveMonthStats = '0,0,0.0,0.00';
+  if (!performanceCache.trainer.twelve_months[trainerId]) {
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
+    const today = new Date().toISOString().split('T')[0];
+    
+    const twelveMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${twelveMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`, `Trainer ${trainerName} 12-month stats`);
+    if (twelveMonthData && twelveMonthData.summary) {
+      twelveMonthStats = `${twelveMonthData.summary.runs},${twelveMonthData.summary.wins},${twelveMonthData.summary.win_percentage},${twelveMonthData.summary.strike_rate}`;
+      performanceCache.trainer.twelve_months[trainerId] = twelveMonthStats;
+      console.log(`🔥 Cached 12-month stats for trainer ${trainerName}`);
     }
-  });
+  } else {
+    twelveMonthStats = performanceCache.trainer.twelve_months[trainerId];
+    console.log(`🔥 Using cached 12-month stats for trainer ${trainerName}`);
+  }
   
-  console.log(`🎯 Final trainer analysis for ${trainerName}:`, JSON.stringify(analysis, null, 2));
+  // Cached 3-month stats
+  let threeMonthStats = '0,0,0.0,0.00';
+  if (!performanceCache.trainer.three_months[trainerId]) {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const today = new Date().toISOString().split('T')[0];
+    
+    const threeMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${threeMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`, `Trainer ${trainerName} 3-month stats`);
+    if (threeMonthData && threeMonthData.summary) {
+      threeMonthStats = `${threeMonthData.summary.runs},${threeMonthData.summary.wins},${threeMonthData.summary.win_percentage},${threeMonthData.summary.strike_rate}`;
+      performanceCache.trainer.three_months[trainerId] = threeMonthStats;
+      console.log(`🔥 Cached 3-month stats for trainer ${trainerName}`);
+    }
+  } else {
+    threeMonthStats = performanceCache.trainer.three_months[trainerId];
+    console.log(`🔥 Using cached 3-month stats for trainer ${trainerName}`);
+  }
+  
+  // Variable data - trainer/jockey partnerships
+  let trainerJockeyData = '0,0,0.0,0.00';
+  if (jockeyId) {
+    try {
+      const jockeyData = await makeAPICall(`/trainers/${trainerId}/analysis/jockeys`, `Trainer ${trainerName} jockey partnerships`);
+      if (jockeyData && jockeyData.length > 0) {
+        const jockeyMatch = jockeyData.find(j => String(j.jockey_id) === String(jockeyId));
+        if (jockeyMatch) {
+          trainerJockeyData = `${jockeyMatch.runs},${jockeyMatch.wins},${jockeyMatch.win_percentage},${jockeyMatch.strike_rate || jockeyMatch.avg_odds || '0.00'}`;
+        }
+      }
+    } catch (error) {
+      console.log(`⚠️  Error fetching trainer-jockey data: ${error.message}`);
+    }
+  }
+  
+  // Return simplified analysis structure
+  const analysis = {
+    lifetime: lifetimeStats,
+    twelve_months: twelveMonthStats,
+    three_months: threeMonthStats,
+    jockey: trainerJockeyData,
+    jockey_3_months: '0,0,0.0,0.00', // Could be calculated if needed
+    course: '0,0,0.0,0.00',           // Could be calculated if needed
+    owner: '0,0,0.0,0.00'             // Could be calculated if needed
+  };
+  
   return analysis;
+  
+} catch (error) {
+  console.error(`❌ Error analyzing trainer ${trainerName}:`, error.message);
+  return null;
 }
 
-// Check if runner needs analysis (has null or failed data)
+// Check if runner needs analysis (has null or failed data) - IMPROVED VERSION
 function needsAnalysis(runner) {
-  const jockeyFields = [
-    'jockey_lifetime', 'jockey_12_months', 'jockey_3_months', 
-    'jockey_trainer', 'jockey_trainer_3_months',
-    'jockey_course', 'jockey_owner'
-  ];
+  // Core essential fields that must be populated
+  const coreJockeyFields = ['jockey_lifetime', 'jockey_12_months', 'jockey_3_months'];
+  const coreTrainerFields = ['trainer_lifetime', 'trainer_12_months', 'trainer_3_months'];
   
-  const trainerFields = [
-    'trainer_lifetime', 'trainer_12_months', 'trainer_3_months',
-    'trainer_jockey', 'trainer_jockey_3_months',
-    'trainer_course', 'trainer_owner'
-  ];
-  
-  const allFields = [...jockeyFields, ...trainerFields];
-  
-  // Check if any field is null, empty, or contains failed data (0,0,0.0,0.00)
-  for (const field of allFields) {
+  // Check if core jockey fields are missing
+  let missingCoreJockey = 0;
+  coreJockeyFields.forEach(field => {
     const value = runner[field];
-    if (!value || 
-        value === null || 
-        value === '' || 
-        value === '0,0,0.0,0.00' ||
-        value === '0,0,0,0' ||
-        value.startsWith('0,0,0')) {
-      return true;
+    if (!value || value === null || value === '' || value === '0,0,0.0,0.00' || value === '0,0,0,0' || value.startsWith('0,0,0')) {
+      missingCoreJockey++;
     }
+  });
+  
+  // Check if core trainer fields are missing
+  let missingCoreTrainer = 0;
+  coreTrainerFields.forEach(field => {
+    const value = runner[field];
+    if (!value || value === null || value === '' || value === '0,0,0.0,0.00' || value === '0,0,0,0' || value.startsWith('0,0,0')) {
+      missingCoreTrainer++;
+    }
+  });
+  
+  // Only process if missing 2 or more core fields (prioritize runners with most missing data)
+  const totalMissingCore = missingCoreJockey + missingCoreTrainer;
+  
+  if (totalMissingCore >= 2) {
+    console.log(`🎯 Runner ${runner.horse_name} needs analysis: ${totalMissingCore} core fields missing`);
+    return true;
   }
   
   return false;
@@ -922,8 +772,10 @@ async function processTodaysRunners() {
     
     // Process runners by jockey_id to maximize cache efficiency
     for (const runner of runnersNeedingAnalysis) {
+      const runnerStartTime = Date.now();
       processedCount++;
       console.log(`\n=== Processing Runner ${processedCount}/${runnersNeedingAnalysis.length} ===`);
+      console.log(`⏱️  Started at: ${new Date().toISOString()}`);
       console.log(`Horse: ${runner.horse_name}`);
       console.log(`Jockey: ${runner.jockey} (${runner.jockey_id})`);
       console.log(`Trainer: ${runner.trainer} (${runner.trainer_id})`);
@@ -956,13 +808,16 @@ async function processTodaysRunners() {
       console.log(`Fields needing update: ${nullFields.length > 0 ? nullFields.join(', ') : 'All fields complete'}`);
       
       try {
+        const entityStartTime = Date.now();
         // Get entity IDs and course name
         const courseName = race?.course || '';
         const ownerId = await searchEntityIdCached('owners', runner.owner);
+        console.log(`⏱️  Entity ID lookup took: ${Date.now() - entityStartTime}ms`);
         
         // Analyze jockey
         let jockeyAnalysis = {};
         if (runner.jockey_id) {
+          const jockeyStartTime = Date.now();
           console.log(`🔍 Starting jockey analysis for: ${runner.jockey} (ID: ${runner.jockey_id})`);
           jockeyAnalysis = await analyzeJockey(
             runner.jockey_id,
@@ -973,7 +828,7 @@ async function processTodaysRunners() {
             runner.age
           );
           console.log(`✅ Jockey analysis complete: ${Object.keys(jockeyAnalysis).length} fields returned`);
-          console.log(`📊 Jockey analysis result:`, JSON.stringify(jockeyAnalysis, null, 2));
+          console.log(`⏱️  Jockey analysis took: ${Date.now() - jockeyStartTime}ms`);
         } else {
           console.log(`⚠️  No jockey_id found for runner, skipping jockey analysis`);
         }
@@ -981,6 +836,7 @@ async function processTodaysRunners() {
         // Analyze trainer
         let trainerAnalysis = {};
         if (runner.trainer_id) {
+          const trainerStartTime = Date.now();
           console.log(`🔍 Starting trainer analysis for: ${runner.trainer} (ID: ${runner.trainer_id})`);
           trainerAnalysis = await analyzeTrainer(
             runner.trainer_id,
@@ -991,17 +847,20 @@ async function processTodaysRunners() {
             runner.age
           );
           console.log(`✅ Trainer analysis complete: ${Object.keys(trainerAnalysis).length} fields returned`);
-          console.log(`📊 Trainer analysis result:`, JSON.stringify(trainerAnalysis, null, 2));
+          console.log(`⏱️  Trainer analysis took: ${Date.now() - trainerStartTime}ms`);
         } else {
           console.log(`⚠️  No trainer_id found for runner, skipping trainer analysis`);
         }
         
         // Update runner with analysis
+        const updateStartTime = Date.now();
         console.log(`💾 About to update runner ${runner.id} with analysis data...`);
         console.log(`🎯 Has jockey data: ${Object.keys(jockeyAnalysis).length > 0}`);
         console.log(`🎯 Has trainer data: ${Object.keys(trainerAnalysis).length > 0}`);
         
         const success = await updateRunnerAnalysis(runner.id, jockeyAnalysis, trainerAnalysis);
+        console.log(`⏱️  Database update took: ${Date.now() - updateStartTime}ms`);
+        
         if (success) {
           successCount++;
           console.log(`✅ Runner ${runner.id} updated successfully (Total successful: ${successCount})`);
@@ -1009,8 +868,13 @@ async function processTodaysRunners() {
           console.log(`❌ Failed to update runner ${runner.id} (Total failed: ${processedCount - successCount})`);
         }
         
+        const totalRunnerTime = Date.now() - runnerStartTime;
+        console.log(`⏱️  TOTAL TIME FOR RUNNER: ${totalRunnerTime}ms (${(totalRunnerTime/1000).toFixed(1)}s)`);
+        console.log(`⚡ Estimated time remaining: ${((totalRunnerTime * (runnersNeedingAnalysis.length - processedCount)) / 1000 / 60).toFixed(1)} minutes`);
+        
       } catch (error) {
         console.error(`Error processing runner ${runner.horse_name}:`, error.message);
+        console.log(`⏱️  Failed runner took: ${Date.now() - runnerStartTime}ms`);
       }
     }
     
