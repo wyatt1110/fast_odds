@@ -18,6 +18,24 @@ const API_PASSWORD = process.env.RACING_API_PASSWORD || 'T5BoPivL3Q2h6RhCdLv4EwZ
 // Persistent entity cache file path
 const CACHE_FILE_PATH = path.join(__dirname, 'entity-cache.json');
 
+// In-memory performance data cache (only persists during script execution)
+const performanceCache = {
+  jockey: {
+    lifetime: {},
+    twelve_months: {},
+    three_months: {},
+  },
+  trainer: {
+    lifetime: {},
+    twelve_months: {},
+    three_months: {},
+  },
+  stats: {
+    jockey_api_calls_saved: 0,
+    trainer_api_calls_saved: 0
+  }
+};
+
 // Load persistent cache from file
 function loadPersistentCache() {
   try {
@@ -279,96 +297,135 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
   const today = new Date().toISOString().split('T')[0];
   
   try {
-    // 1. Get lifetime stats from courses analysis (this gives us comprehensive data)
-    console.log('📊 Getting jockey lifetime stats...');
-    const lifetimeData = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses`);
-    
-    if (lifetimeData && lifetimeData.courses) {
-      const totalRides = lifetimeData.total_rides || 0;
-      const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-      const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
+    // Check cache for lifetime stats first
+    if (performanceCache.jockey.lifetime[jockeyId]) {
+      analysis.lifetime = performanceCache.jockey.lifetime[jockeyId];
+      console.log(`🔥 Using cached lifetime stats for jockey ${jockeyName}`);
+      performanceCache.stats.jockey_api_calls_saved++;
+    } else {
+      // 1. Get lifetime stats from courses analysis (this gives us comprehensive data)
+      console.log('📊 Getting jockey lifetime stats...');
+      const lifetimeData = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses`);
       
-      analysis.lifetime = formatStats(
-        totalRides,
-        totalWins,
-        totalRides > 0 ? (totalWins / totalRides * 100) : 0,
-        totalPL
-      );
-      console.log(`✅ Lifetime: ${analysis.lifetime}`);
-      
-      // Extract course-specific data from lifetime stats (avoid extra API call)
-      if (courseId) {
-        const courseMatch = lifetimeData.courses.find(c => {
-          if (!c.course) return false;
-          const cleanCourseName = cleanName(c.course);
-          const cleanTargetCourse = cleanName(courseId);
-          return cleanCourseName.toLowerCase() === cleanTargetCourse.toLowerCase();
-        });
+      if (lifetimeData && lifetimeData.courses) {
+        const totalRides = lifetimeData.total_rides || 0;
+        const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
+        const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
         
-        if (courseMatch) {
-          analysis.course = formatStats(
-            courseMatch.rides || 0,
-            courseMatch['1st'] || 0,
-            courseMatch['win_%'] ? courseMatch['win_%'] * 100 : 0,
-            parseFloat(courseMatch['1_pl'] || 0)
-          );
-          console.log(`✅ Jockey/Course (${courseMatch.course}): ${analysis.course}`);
-        } else {
-          analysis.course = formatStats(0, 0, 0, 0);
+        analysis.lifetime = formatStats(
+          totalRides,
+          totalWins,
+          totalRides > 0 ? (totalWins / totalRides * 100) : 0,
+          totalPL
+        );
+        console.log(`✅ Lifetime: ${analysis.lifetime}`);
+        
+        // Cache the lifetime stats for future use in this session
+        performanceCache.jockey.lifetime[jockeyId] = analysis.lifetime;
+        
+        // Extract course-specific data from lifetime stats (avoid extra API call)
+        if (courseId) {
+          const courseMatch = lifetimeData.courses.find(c => {
+            if (!c.course) return false;
+            const cleanCourseName = cleanName(c.course);
+            const cleanTargetCourse = cleanName(courseId);
+            return cleanCourseName.toLowerCase() === cleanTargetCourse.toLowerCase();
+          });
+          
+          if (courseMatch) {
+            analysis.course = formatStats(
+              courseMatch.rides || 0,
+              courseMatch['1st'] || 0,
+              courseMatch['win_%'] ? courseMatch['win_%'] * 100 : 0,
+              parseFloat(courseMatch['1_pl'] || 0)
+            );
+            console.log(`✅ Jockey/Course (${courseMatch.course}): ${analysis.course}`);
+          } else {
+            analysis.course = formatStats(0, 0, 0, 0);
+          }
         }
       }
     }
     
-    // 2. Get recent results for 12-month and 3-month analysis (combined call with larger limit)
-    console.log('📈 Getting jockey recent results...');
-    const twelveMonthsAgoStr = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=50`);
+    // Check cache for recent results data (used for both 12-month and 3-month)
+    const useCache12Month = performanceCache.jockey.twelve_months[jockeyId] !== undefined;
+    const useCache3Month = performanceCache.jockey.three_months[jockeyId] !== undefined;
     
-    if (recentResults && recentResults.results) {
-      // Calculate 12-month stats
-      const stats12Month = calculateStatsFromResults(recentResults.results, jockeyName);
-      analysis.twelve_months = formatStats(stats12Month.rides, stats12Month.wins, stats12Month.win_percentage, stats12Month.profit_loss);
-      console.log(`✅ 12 months: ${analysis.twelve_months}`);
+    if (useCache12Month) {
+      analysis.twelve_months = performanceCache.jockey.twelve_months[jockeyId];
+      console.log(`🔥 Using cached 12-month stats for jockey ${jockeyName}`);
+      performanceCache.stats.jockey_api_calls_saved++;
+    }
+    
+    if (useCache3Month) {
+      analysis.three_months = performanceCache.jockey.three_months[jockeyId];
+      console.log(`🔥 Using cached 3-month stats for jockey ${jockeyName}`);
+      performanceCache.stats.jockey_api_calls_saved++;
+    }
+    
+    // Only make API call if we need either 12-month or 3-month data
+    if (!useCache12Month || !useCache3Month) {
+      // 2. Get recent results for 12-month and 3-month analysis (combined call with larger limit)
+      console.log('📈 Getting jockey recent results...');
+      const twelveMonthsAgoStr = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=50`);
       
-      // Calculate 3-month stats from the same dataset
-      const threeMonthsAgoStr = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const recent3MonthResults = recentResults.results.filter(race => 
-        race.date >= threeMonthsAgoStr
-      );
-      const stats3Month = calculateStatsFromResults(recent3MonthResults, jockeyName);
-      analysis.three_months = formatStats(stats3Month.rides, stats3Month.wins, stats3Month.win_percentage, stats3Month.profit_loss);
-      console.log(`✅ 3 months: ${analysis.three_months}`);
+      if (recentResults && recentResults.results) {
+        if (!useCache12Month) {
+          // Calculate 12-month stats
+          const stats12Month = calculateStatsFromResults(recentResults.results, jockeyName);
+          analysis.twelve_months = formatStats(stats12Month.rides, stats12Month.wins, stats12Month.win_percentage, stats12Month.profit_loss);
+          console.log(`✅ 12 months: ${analysis.twelve_months}`);
+          
+          // Cache for future use in this session
+          performanceCache.jockey.twelve_months[jockeyId] = analysis.twelve_months;
+        }
+        
+        if (!useCache3Month) {
+          // Calculate 3-month stats from the same dataset
+          const threeMonthsAgoStr = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          const recent3MonthResults = recentResults.results.filter(race => 
+            race.date >= threeMonthsAgoStr
+          );
+          const stats3Month = calculateStatsFromResults(recent3MonthResults, jockeyName);
+          analysis.three_months = formatStats(stats3Month.rides, stats3Month.wins, stats3Month.win_percentage, stats3Month.profit_loss);
+          console.log(`✅ 3 months: ${analysis.three_months}`);
+          
+          // Cache for future use in this session
+          performanceCache.jockey.three_months[jockeyId] = analysis.three_months;
+        }
       
-      // Calculate trainer partnership from recent results (avoid extra API call)
-      if (trainerId && recent3MonthResults.length > 0) {
-        let trainerRides = 0, trainerWins = 0, trainerPL = 0;
-        
-        recent3MonthResults.forEach(race => {
-          if (race.runners) {
-            const jockeyTrainerRuns = race.runners.filter(runner => 
-              runner.jockey && runner.jockey.toLowerCase().includes(jockeyName.toLowerCase()) &&
-              runner.trainer_id === trainerId
-            );
-            
-            jockeyTrainerRuns.forEach(run => {
-              trainerRides++;
-              if (run.position === '1') trainerWins++;
-              if (run.position === '1' && run.sp_dec) {
-                trainerPL += (parseFloat(run.sp_dec) - 1);
-              } else {
-                trainerPL -= 1;
-              }
-            });
-          }
-        });
-        
-        analysis.trainer_3_months = formatStats(
-          trainerRides,
-          trainerWins,
-          trainerRides > 0 ? (trainerWins / trainerRides * 100) : 0,
-          trainerPL
-        );
-        console.log(`✅ Jockey/Trainer 3-month: ${analysis.trainer_3_months}`);
+        // Calculate trainer partnership from recent results (avoid extra API call)
+        if (trainerId && recent3MonthResults.length > 0) {
+          let trainerRides = 0, trainerWins = 0, trainerPL = 0;
+          
+          recent3MonthResults.forEach(race => {
+            if (race.runners) {
+              const jockeyTrainerRuns = race.runners.filter(runner => 
+                runner.jockey && runner.jockey.toLowerCase().includes(jockeyName.toLowerCase()) &&
+                runner.trainer_id === trainerId
+              );
+              
+              jockeyTrainerRuns.forEach(run => {
+                trainerRides++;
+                if (run.position === '1') trainerWins++;
+                if (run.position === '1' && run.sp_dec) {
+                  trainerPL += (parseFloat(run.sp_dec) - 1);
+                } else {
+                  trainerPL -= 1;
+                }
+              });
+            }
+          });
+          
+          analysis.trainer_3_months = formatStats(
+            trainerRides,
+            trainerWins,
+            trainerRides > 0 ? (trainerWins / trainerRides * 100) : 0,
+            trainerPL
+          );
+          console.log(`✅ Jockey/Trainer 3-month: ${analysis.trainer_3_months}`);
+        }
       }
     }
     
@@ -437,87 +494,117 @@ async function analyzeTrainer(trainerId, trainerName, jockeyId, courseId, ownerI
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
   
   try {
-    // 1. Get comprehensive lifetime stats
-    console.log('📊 Getting trainer lifetime stats...');
-    const lifetimeData = await makeAPICall(`/trainers/${trainerId}/analysis/courses`);
-    
-    if (lifetimeData && lifetimeData.courses) {
-      const totalRunners = lifetimeData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
-      const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-      const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
+    // Check cache for lifetime stats first
+    if (performanceCache.trainer.lifetime[trainerId]) {
+      analysis.lifetime = performanceCache.trainer.lifetime[trainerId];
+      console.log(`🔥 Using cached lifetime stats for trainer ${trainerName}`);
+      performanceCache.stats.trainer_api_calls_saved++;
+    } else {
+      // 1. Get comprehensive lifetime stats
+      console.log('📊 Getting trainer lifetime stats...');
+      const lifetimeData = await makeAPICall(`/trainers/${trainerId}/analysis/courses`);
       
-      analysis.lifetime = formatStats(
-        totalRunners,
-        totalWins,
-        totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
-        totalPL
-      );
-      console.log(`✅ Lifetime: ${analysis.lifetime}`);
-      
-      // Extract course-specific data from lifetime stats
-      if (courseId) {
-        const courseMatch = lifetimeData.courses.find(c => {
-          if (!c.course) return false;
-          const cleanCourseName = cleanName(c.course);
-          const cleanTargetCourse = cleanName(courseId);
-          return cleanCourseName.toLowerCase() === cleanTargetCourse.toLowerCase();
-        });
+      if (lifetimeData && lifetimeData.courses) {
+        const totalRunners = lifetimeData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
+        const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
+        const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
         
-        if (courseMatch) {
-          analysis.course = formatStats(
-            courseMatch.runners || 0,
-            courseMatch['1st'] || 0,
-            courseMatch['win_%'] ? courseMatch['win_%'] * 100 : 0,
-            parseFloat(courseMatch['1_pl'] || 0)
-          );
-          console.log(`✅ Trainer/Course (${courseMatch.course}): ${analysis.course}`);
-        } else {
-          analysis.course = formatStats(0, 0, 0, 0);
+        analysis.lifetime = formatStats(
+          totalRunners,
+          totalWins,
+          totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
+          totalPL
+        );
+        console.log(`✅ Lifetime: ${analysis.lifetime}`);
+        
+        // Cache the lifetime stats for future use in this session
+        performanceCache.trainer.lifetime[trainerId] = analysis.lifetime;
+        
+        // Extract course-specific data from lifetime stats
+        if (courseId) {
+          const courseMatch = lifetimeData.courses.find(c => {
+            if (!c.course) return false;
+            const cleanCourseName = cleanName(c.course);
+            const cleanTargetCourse = cleanName(courseId);
+            return cleanCourseName.toLowerCase() === cleanTargetCourse.toLowerCase();
+          });
+          
+          if (courseMatch) {
+            analysis.course = formatStats(
+              courseMatch.runners || 0,
+              courseMatch['1st'] || 0,
+              courseMatch['win_%'] ? courseMatch['win_%'] * 100 : 0,
+              parseFloat(courseMatch['1_pl'] || 0)
+            );
+            console.log(`✅ Trainer/Course (${courseMatch.course}): ${analysis.course}`);
+          } else {
+            analysis.course = formatStats(0, 0, 0, 0);
+          }
         }
       }
     }
     
-    // 2. Get time-specific data with single calls
-    console.log('📈 Getting trainer 12-month stats...');
-    try {
-      const twelveMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${twelveMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`);
-      if (twelveMonthData && twelveMonthData.courses) {
-        const totalRunners = twelveMonthData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
-        const totalWins = twelveMonthData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-        const totalPL = twelveMonthData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
-        
-        analysis.twelve_months = formatStats(
-          totalRunners,
-          totalWins,
-          totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
-          totalPL
-        );
-        console.log(`✅ 12 months: ${analysis.twelve_months}`);
+    // Check cache for 12-month stats
+    if (performanceCache.trainer.twelve_months[trainerId]) {
+      analysis.twelve_months = performanceCache.trainer.twelve_months[trainerId];
+      console.log(`🔥 Using cached 12-month stats for trainer ${trainerName}`);
+      performanceCache.stats.trainer_api_calls_saved++;
+    } else {
+      // 2. Get time-specific data with single calls
+      console.log('📈 Getting trainer 12-month stats...');
+      try {
+        const twelveMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${twelveMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`);
+        if (twelveMonthData && twelveMonthData.courses) {
+          const totalRunners = twelveMonthData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
+          const totalWins = twelveMonthData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
+          const totalPL = twelveMonthData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
+          
+          analysis.twelve_months = formatStats(
+            totalRunners,
+            totalWins,
+            totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
+            totalPL
+          );
+          console.log(`✅ 12 months: ${analysis.twelve_months}`);
+          
+          // Cache for future use in this session
+          performanceCache.trainer.twelve_months[trainerId] = analysis.twelve_months;
+        }
+      } catch (error) {
+        console.error(`⚠️  Could not get trainer 12-month data: ${error.message}`);
+        analysis.twelve_months = formatStats(0, 0, 0, 0);
       }
-    } catch (error) {
-      console.error(`⚠️  Could not get trainer 12-month data: ${error.message}`);
-      analysis.twelve_months = formatStats(0, 0, 0, 0);
     }
     
-    console.log('📈 Getting trainer 3-month stats...');
-    try {
-      const threeMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${threeMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`);
-      if (threeMonthData && threeMonthData.courses) {
-        const totalRunners = threeMonthData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
-        const totalWins = threeMonthData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
-        const totalPL = threeMonthData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
-        
-        analysis.three_months = formatStats(
-          totalRunners,
-          totalWins,
-          totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
-          totalPL
-        );
-        console.log(`✅ 3 months: ${analysis.three_months}`);
+    // Check cache for 3-month stats
+    if (performanceCache.trainer.three_months[trainerId]) {
+      analysis.three_months = performanceCache.trainer.three_months[trainerId];
+      console.log(`🔥 Using cached 3-month stats for trainer ${trainerName}`);
+      performanceCache.stats.trainer_api_calls_saved++;
+    } else {
+      console.log('📈 Getting trainer 3-month stats...');
+      try {
+        const threeMonthData = await makeAPICall(`/trainers/${trainerId}/analysis/courses?start_date=${threeMonthsAgo.toISOString().split('T')[0]}&end_date=${today}`);
+        if (threeMonthData && threeMonthData.courses) {
+          const totalRunners = threeMonthData.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
+          const totalWins = threeMonthData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
+          const totalPL = threeMonthData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
+          
+          analysis.three_months = formatStats(
+            totalRunners,
+            totalWins,
+            totalRunners > 0 ? (totalWins / totalRunners * 100) : 0,
+            totalPL
+          );
+          console.log(`✅ 3 months: ${analysis.three_months}`);
+          
+          // Cache for future use in this session
+          performanceCache.trainer.three_months[trainerId] = analysis.three_months;
+        }
+      } catch (error) {
+        console.error(`⚠️  Could not get trainer 3-month data: ${error.message}`);
+        analysis.three_months = formatStats(0, 0, 0, 0);
       }
-    } catch (error) {
-      console.error(`⚠️  Could not get trainer 3-month data: ${error.message}`);
-      analysis.three_months = formatStats(0, 0, 0, 0);
     }
     
     // 3. Only get partnership data if critical
@@ -720,18 +807,59 @@ async function processTodaysRunners() {
       raceMap[race.race_id] = race;
     });
     
-      // Process ALL runners for the day
-  console.log(`⚡ Processing all ${runnersNeedingAnalysis.length} runners for today`);
-  
-  // Show estimated time
-  const estimatedMinutes = Math.ceil((runnersNeedingAnalysis.length * 6 * RATE_LIMIT_DELAY) / 60000); // 6 API calls per runner
-  console.log(`⏱️  Estimated completion time: ${estimatedMinutes} minutes\n`);
-  
-  // Process each runner that needs analysis
-  let processedCount = 0;
-  let successCount = 0;
-  
-  for (const runner of runnersNeedingAnalysis) {
+    // OPTIMIZATION: Group unique jockeys and trainers
+    const uniqueJockeys = {};
+    const uniqueTrainers = {};
+    const runnersByJockeyId = {};
+    const runnersByTrainerId = {};
+    
+    console.log(`🔍 Finding unique jockeys and trainers for optimization...`);
+    
+    runnersNeedingAnalysis.forEach(runner => {
+      // Group unique jockeys
+      if (runner.jockey_id && !uniqueJockeys[runner.jockey_id]) {
+        uniqueJockeys[runner.jockey_id] = runner.jockey;
+      }
+      
+      // Group unique trainers
+      if (runner.trainer_id && !uniqueTrainers[runner.trainer_id]) {
+        uniqueTrainers[runner.trainer_id] = runner.trainer;
+      }
+      
+      // Group runners by jockey
+      if (runner.jockey_id) {
+        if (!runnersByJockeyId[runner.jockey_id]) {
+          runnersByJockeyId[runner.jockey_id] = [];
+        }
+        runnersByJockeyId[runner.jockey_id].push(runner);
+      }
+      
+      // Group runners by trainer
+      if (runner.trainer_id) {
+        if (!runnersByTrainerId[runner.trainer_id]) {
+          runnersByTrainerId[runner.trainer_id] = [];
+        }
+        runnersByTrainerId[runner.trainer_id].push(runner);
+      }
+    });
+    
+    const uniqueJockeyCount = Object.keys(uniqueJockeys).length;
+    const uniqueTrainerCount = Object.keys(uniqueTrainers).length;
+    
+    console.log(`🏇 Found ${uniqueJockeyCount} unique jockeys for ${runnersNeedingAnalysis.length} runners`);
+    console.log(`🎯 Found ${uniqueTrainerCount} unique trainers for ${runnersNeedingAnalysis.length} runners`);
+    
+    // Show estimated time with optimization
+    const estimatedCalls = uniqueJockeyCount * 2 + uniqueTrainerCount * 2 + runnersNeedingAnalysis.length * 2;
+    const estimatedMinutes = Math.ceil((estimatedCalls * RATE_LIMIT_DELAY) / 60000);
+    console.log(`⏱️  Estimated completion time with optimization: ~${estimatedMinutes} minutes (down from ${Math.ceil((runnersNeedingAnalysis.length * 6 * RATE_LIMIT_DELAY) / 60000)} minutes)\n`);
+    
+    // Process each runner that needs analysis
+    let processedCount = 0;
+    let successCount = 0;
+    
+    // Process runners by jockey_id to maximize cache efficiency
+    for (const runner of runnersNeedingAnalysis) {
       processedCount++;
       console.log(`\n=== Processing Runner ${processedCount}/${runnersNeedingAnalysis.length} ===`);
       console.log(`Horse: ${runner.horse_name}`);
@@ -802,8 +930,6 @@ async function processTodaysRunners() {
         
         // Update runner with analysis
         console.log(`💾 Updating runner ${runner.id} with analysis data...`);
-        console.log(`📊 Jockey analysis data:`, JSON.stringify(jockeyAnalysis, null, 2));
-        console.log(`📊 Trainer analysis data:`, JSON.stringify(trainerAnalysis, null, 2));
         
         const success = await updateRunnerAnalysis(runner.id, jockeyAnalysis, trainerAnalysis);
         if (success) {
@@ -826,7 +952,9 @@ async function processTodaysRunners() {
     // Show cache performance
     console.log(`\n📊 Cache Performance:`);
     console.log(`💾 Persistent cache entities: ${persistentCache.stats.total_entities}`);
-    console.log(`🚀 API calls saved this session: ${persistentCache.stats.api_calls_saved}`);
+    console.log(`🚀 Entity API calls saved: ${persistentCache.stats.api_calls_saved}`);
+    console.log(`🔥 Jockey performance API calls saved: ${performanceCache.stats.jockey_api_calls_saved}`);
+    console.log(`🔥 Trainer performance API calls saved: ${performanceCache.stats.trainer_api_calls_saved}`);
     console.log(`📁 Cache file: ${CACHE_FILE_PATH}`);
     
   } catch (error) {
@@ -858,4 +986,4 @@ module.exports = {
   analyzeTrainer,
   needsAnalysis,
   processTodaysRunners
-}; 
+};
