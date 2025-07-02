@@ -299,16 +299,21 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     if (!lifetimeStats) {
       const lifetimeData = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses`, `Jockey ${jockeyName} lifetime stats`);
       
-      if (lifetimeData && lifetimeData.summary) {
-        lifetimeStats = `${lifetimeData.summary.runs},${lifetimeData.summary.wins},${lifetimeData.summary.win_percentage},${lifetimeData.summary.strike_rate}`;
+      if (lifetimeData && lifetimeData.courses) {
+        const totalRides = lifetimeData.courses.reduce((sum, c) => sum + (c.rides || 0), 0);
+        const totalWins = lifetimeData.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
+        const winPercentage = totalRides > 0 ? (totalWins / totalRides * 100) : 0;
+        const totalPL = lifetimeData.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
+        
+        lifetimeStats = `${totalRides},${totalWins},${winPercentage.toFixed(1)},${totalPL.toFixed(2)}`;
         performanceCache.jockey.lifetime[cacheKey] = lifetimeStats;
-        console.log(`🔥 Cached lifetime stats for jockey ${jockeyName}`);
-        } else {
+        console.log(`🔥 Cached lifetime stats for jockey ${jockeyName}: ${lifetimeStats}`);
+      } else {
         lifetimeStats = '0,0,0.0,0.00';
         console.log(`⚠️  No lifetime data found for jockey ${jockeyName}`);
       }
     } else {
-      console.log(`🔥 Using cached lifetime stats for jockey ${jockeyName}`);
+      console.log(`🔥 Using cached lifetime stats for jockey ${jockeyName}: ${lifetimeStats}`);
     }
     
     // Get 12-month results (cached)
@@ -317,28 +322,44 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
     
     if (!recent12MonthResults) {
       const twelveMonthsAgo = new Date();
-      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+      twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
       const twelveMonthsAgoStr = twelveMonthsAgo.toISOString().split('T')[0];
       const today = new Date().toISOString().split('T')[0];
       
-      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=50`, `Jockey ${jockeyName} 12-month results`);
+      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${twelveMonthsAgoStr}&end_date=${today}&limit=100`, `Jockey ${jockeyName} 12-month results`);
       
-      if (recentResults && recentResults.length > 0) {
-        const wins = recentResults.filter(result => result.finishing_position === 1).length;
-        const winPercentage = ((wins / recentResults.length) * 100).toFixed(2);
-        const avgOdds = recentResults.length > 0 ? 
-          (recentResults.reduce((sum, r) => sum + (r.starting_price_decimal || 0), 0) / recentResults.length).toFixed(2) : 
-          '0.00';
+      if (recentResults && recentResults.results && recentResults.results.length > 0) {
+        const allRuns = [];
+        recentResults.results.forEach(race => {
+          if (race.runners) {
+            race.runners.forEach(runner => {
+              if (runner.jockey_id === jockeyId) {
+                allRuns.push(runner);
+              }
+            });
+          }
+        });
         
-        recent12MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
+        const wins = allRuns.filter(run => run.position === '1').length;
+        const winPercentage = allRuns.length > 0 ? ((wins / allRuns.length) * 100) : 0;
+        let profitLoss = 0;
+        allRuns.forEach(run => {
+          if (run.position === '1' && run.sp_dec) {
+            profitLoss += (parseFloat(run.sp_dec) - 1);
+          } else {
+            profitLoss -= 1;
+          }
+        });
+        
+        recent12MonthResults = `${allRuns.length},${wins},${winPercentage.toFixed(1)},${profitLoss.toFixed(2)}`;
         performanceCache.jockey.twelve_months[twelveMonthCacheKey] = recent12MonthResults;
-        console.log(`🔥 Cached 12-month stats for jockey ${jockeyName}`);
-              } else {
+        console.log(`🔥 Cached 12-month stats for jockey ${jockeyName}: ${recent12MonthResults}`);
+      } else {
         recent12MonthResults = '0,0,0.0,0.00';
         console.log(`⚠️  No 12-month data found for jockey ${jockeyName}`);
       }
     } else {
-      console.log(`🔥 Using cached 12-month stats for jockey ${jockeyName}`);
+      console.log(`🔥 Using cached 12-month stats for jockey ${jockeyName}: ${recent12MonthResults}`);
     }
     
     // Get 3-month results (cached)
@@ -351,24 +372,40 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
       const threeMonthsAgoStr = threeMonthsAgo.toISOString().split('T')[0];
       const today = new Date().toISOString().split('T')[0];
       
-      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${threeMonthsAgoStr}&end_date=${today}&limit=50`, `Jockey ${jockeyName} 3-month results`);
+      const recentResults = await makeAPICall(`/jockeys/${jockeyId}/results?start_date=${threeMonthsAgoStr}&end_date=${today}&limit=100`, `Jockey ${jockeyName} 3-month results`);
       
-      if (recentResults && recentResults.length > 0) {
-        const wins = recentResults.filter(result => result.finishing_position === 1).length;
-        const winPercentage = ((wins / recentResults.length) * 100).toFixed(2);
-        const avgOdds = recentResults.length > 0 ? 
-          (recentResults.reduce((sum, r) => sum + (r.starting_price_decimal || 0), 0) / recentResults.length).toFixed(2) : 
-          '0.00';
+      if (recentResults && recentResults.results && recentResults.results.length > 0) {
+        const allRuns = [];
+        recentResults.results.forEach(race => {
+          if (race.runners) {
+            race.runners.forEach(runner => {
+              if (runner.jockey_id === jockeyId) {
+                allRuns.push(runner);
+              }
+            });
+          }
+        });
         
-        recent3MonthResults = `${recentResults.length},${wins},${winPercentage},${avgOdds}`;
+        const wins = allRuns.filter(run => run.position === '1').length;
+        const winPercentage = allRuns.length > 0 ? ((wins / allRuns.length) * 100) : 0;
+        let profitLoss = 0;
+        allRuns.forEach(run => {
+          if (run.position === '1' && run.sp_dec) {
+            profitLoss += (parseFloat(run.sp_dec) - 1);
+          } else {
+            profitLoss -= 1;
+          }
+        });
+        
+        recent3MonthResults = `${allRuns.length},${wins},${winPercentage.toFixed(1)},${profitLoss.toFixed(2)}`;
         performanceCache.jockey.three_months[threeMonthCacheKey] = recent3MonthResults;
-        console.log(`🔥 Cached 3-month stats for jockey ${jockeyName}`);
+        console.log(`🔥 Cached 3-month stats for jockey ${jockeyName}: ${recent3MonthResults}`);
       } else {
         recent3MonthResults = '0,0,0.0,0.00';
         console.log(`⚠️  No 3-month data found for jockey ${jockeyName}`);
       }
     } else {
-      console.log(`🔥 Using cached 3-month stats for jockey ${jockeyName}`);
+      console.log(`🔥 Using cached 3-month stats for jockey ${jockeyName}: ${recent3MonthResults}`);
     }
     
     // Variable data - always fetch (partnership specific)
