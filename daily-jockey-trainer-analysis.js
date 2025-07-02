@@ -445,7 +445,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
           const courseMatch = courseData.courses.find(c => String(c.course_id) === String(courseId) || c.course === courseId);
           if (courseMatch) {
             const winPercentage = courseMatch['win_%'] ? (courseMatch['win_%'] * 100) : 0;
-            jockeyCourseData = `${courseMatch.runners},${courseMatch['1st']},${winPercentage.toFixed(1)},${parseFloat(courseMatch['1_pl'] || 0).toFixed(2)}`;
+            jockeyCourseData = `${courseMatch.rides},${courseMatch['1st']},${winPercentage.toFixed(1)},${parseFloat(courseMatch['1_pl'] || 0).toFixed(2)}`;
           }
         }
       } catch (error) {
