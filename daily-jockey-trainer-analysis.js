@@ -348,7 +348,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
       const recentResults = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses?start_date=${twelveMonthsAgoStr}&end_date=${yesterdayStr}`, `Jockey ${jockeyName} 12-month analysis`);
       
       if (recentResults && recentResults.courses && recentResults.courses.length > 0) {
-        const totalRunners = recentResults.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
+        const totalRunners = recentResults.courses.reduce((sum, c) => sum + (c.rides || 0), 0);
         const totalWins = recentResults.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
         const winPercentage = totalRunners > 0 ? (totalWins / totalRunners * 100) : 0;
         const totalPL = recentResults.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
@@ -380,7 +380,7 @@ async function analyzeJockey(jockeyId, jockeyName, trainerId, courseId, ownerId,
       const recentResults = await makeAPICall(`/jockeys/${jockeyId}/analysis/courses?start_date=${threeMonthsAgoStr}&end_date=${yesterdayStr}`, `Jockey ${jockeyName} 3-month analysis`);
       
       if (recentResults && recentResults.courses && recentResults.courses.length > 0) {
-        const totalRunners = recentResults.courses.reduce((sum, c) => sum + (c.runners || 0), 0);
+        const totalRunners = recentResults.courses.reduce((sum, c) => sum + (c.rides || 0), 0);
         const totalWins = recentResults.courses.reduce((sum, c) => sum + (c['1st'] || 0), 0);
         const winPercentage = totalRunners > 0 ? (totalWins / totalRunners * 100) : 0;
         const totalPL = recentResults.courses.reduce((sum, c) => sum + parseFloat(c['1_pl'] || 0), 0);
