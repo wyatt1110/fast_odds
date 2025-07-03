@@ -1,0 +1,28 @@
+name: SmarterSig Pace Data Scraper
+
+on:
+  schedule:
+    - cron: '5 7 * * *'  # 07:05 AM UK time (GMT)
+    - cron: '5 9 * * *'  # 09:05 AM UK time (GMT)
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install puppeteer @supabase/supabase-js
+
+      - name: Run SmarterSig scraper
+        run: node smartersig-scraper.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
