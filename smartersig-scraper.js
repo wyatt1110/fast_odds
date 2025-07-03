@@ -68,7 +68,7 @@ class SmarterSigScraper {
         console.log('Login completed');
         
         // Add a small delay to ensure page is fully loaded
-        await this.page.waitForTimeout(2000);
+        await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
     async scrapePaceData() {
@@ -76,7 +76,7 @@ class SmarterSigScraper {
         await this.page.goto(this.paceUrl, { waitUntil: 'networkidle2', timeout: 60000 });
         
         // Add a delay to ensure page loads fully
-        await this.page.waitForTimeout(3000);
+        await new Promise(resolve => setTimeout(resolve, 3000));
         
         // Check if we're still logged in by looking for the data
         const hasData = await this.page.$('table[border="1"]');
