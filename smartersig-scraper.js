@@ -20,8 +20,27 @@ class SmarterSigScraper {
             config.supabase.serviceRoleKey
         );
         
-        // Use the date format that matches the races in Supabase
-        this.todaysDate = '2025-07-03'; // Date that matches the scraped data
+        // ALWAYS use today's date in UK timezone (the actual current day)
+        const now = new Date();
+        const ukTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+        this.todaysDate = ukTime.toISOString().split('T')[0];
+        console.log(`Using TODAY'S date for matching: ${this.todaysDate}`);
+        
+        // Course name mapping for common mismatches
+        this.courseMapping = {
+            'newton': ['newton abbot', 'newton'],
+            'newcastle': ['newcastle', 'newcastle (aw)'],
+            'kempton': ['kempton', 'kempton (aw)'],
+            'southwell': ['southwell', 'southwell (aw)'],
+            'wolverhampton': ['wolverhampton', 'wolverhampton (aw)'],
+            'lingfield': ['lingfield', 'lingfield (aw)'],
+            'bangor': ['bangor', 'bangor-on-dee'],
+            'bangor-on-dee': ['bangor', 'bangor-on-dee'],
+            'doncaster': ['doncaster'],
+            'sandown': ['sandown'],
+            'beverley': ['beverley']
+        };
+        
         this.matchingStats = {
             totalRaces: 0,
             matchedRaces: 0,
@@ -221,10 +240,21 @@ class SmarterSigScraper {
     }
 
     cleanCourseName(courseName) {
+        if (!courseName) return '';
+        
         // Remove everything in brackets and trim
-        return courseName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        const cleaned = courseName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        
+        // Check if this is a known course with mapping
+        for (const [key, variants] of Object.entries(this.courseMapping)) {
+            if (variants.includes(cleaned)) {
+                return key;
+            }
+        }
+        
+        return cleaned;
     }
-    
+
     timeToMinutes(timeStr) {
         if (!timeStr) return null;
         
@@ -263,14 +293,18 @@ class SmarterSigScraper {
         const time24h = parts[1]; // In 24-hour HH:MM format
         
         // Convert 24-hour time to 12-hour format without leading zeros (e.g., 18:05 -> 6:05)
-        let time = time24h;
-        if (time24h.includes(':')) {
+        let time12h = time24h;
+        if (time24h && time24h.includes(':')) {
             const [hours, minutes] = time24h.split(':');
             const hour12 = parseInt(hours) > 12 ? parseInt(hours) - 12 : parseInt(hours);
-            time = `${hour12}:${minutes}`;
+            time12h = `${hour12}:${minutes}`;
         }
         
-        return { course, time };
+        return { 
+            course, 
+            time24h,
+            time12h
+        };
     }
 
     async matchRaceInSupabase(raceInfo) {
@@ -293,27 +327,43 @@ class SmarterSigScraper {
                 return null;
             }
 
-            // Find matching race
-            const matchedRace = races.find(race => {
-                const cleanSupabaseCourse = this.cleanCourseName(race.course);
-                const courseMatch = cleanSupabaseCourse === parsed.course;
-                
-                // Extract time from off_time (could be various formats)
-                let timeMatch = false;
-                if (race.off_time) {
-                    const timeStr = race.off_time.includes(':') ? 
-                        race.off_time.split(' ')[0] : // If it has date, take time part
-                        race.off_time;
-                    timeMatch = timeStr === parsed.time;
-                }
+            // Get cleaned course name from parsed info
+            const cleanedSourceCourse = this.cleanCourseName(parsed.course);
+            
+            console.log(`🔍 Looking for race at ${parsed.course} (cleaned: ${cleanedSourceCourse}) at time ${parsed.time12h} or ${parsed.time24h}`);
 
+            // Find matching race - try both 24h and 12h formats
+            const matchedRace = races.find(race => {
+                const cleanDbCourse = this.cleanCourseName(race.course);
+                
+                // Check for course match
+                const courseMatch = (
+                    cleanDbCourse === cleanedSourceCourse || 
+                    (this.courseMapping[cleanedSourceCourse] && 
+                     this.courseMapping[cleanedSourceCourse].includes(cleanDbCourse))
+                );
+                
+                if (!courseMatch) return false;
+                
+                // Check both time formats
+                if (!race.off_time) return false;
+                
+                // Normalize time format from database
+                let dbTime = race.off_time;
+                if (dbTime.includes(' ')) {
+                    dbTime = dbTime.split(' ')[0];
+                }
+                
+                // Try both 12h and 24h formats
+                const timeMatch = (dbTime === parsed.time12h || dbTime === parsed.time24h);
+                
                 return courseMatch && timeMatch;
             });
 
             if (matchedRace) {
                 // Use race_id as the primary key since that's what the table uses
                 const primaryKeyValue = matchedRace.race_id;
-                console.log(`✅ Matched race: ${raceInfo} -> Race ID: ${primaryKeyValue}`);
+                console.log(`✅ Matched race: ${raceInfo} -> Race ID: ${primaryKeyValue} (${matchedRace.course} ${matchedRace.off_time})`);
                 // Ensure we have a standard id property for consistent access
                 return {
                     ...matchedRace,
@@ -321,7 +371,23 @@ class SmarterSigScraper {
                 };
             } else {
                 console.log(`❌ No match found for race: ${raceInfo}`);
-                console.log(`   Looking for: Course='${parsed.course}', Time='${parsed.time}', Date='${this.todaysDate}'`);
+                console.log(`   Looking for: Course='${parsed.course}' (cleaned to '${cleanedSourceCourse}'), Time=${parsed.time12h}/${parsed.time24h}, Date='${this.todaysDate}'`);
+                
+                // Log possible matches based on course only
+                const courseMatches = races.filter(race => {
+                    const cleanDbCourse = this.cleanCourseName(race.course);
+                    return cleanDbCourse === cleanedSourceCourse || 
+                          (this.courseMapping[cleanedSourceCourse] && 
+                           this.courseMapping[cleanedSourceCourse].includes(cleanDbCourse));
+                });
+                
+                if (courseMatches.length > 0) {
+                    console.log(`   Found ${courseMatches.length} races at matching course but different times:`);
+                    courseMatches.forEach(match => {
+                        console.log(`   - ${match.course} at ${match.off_time}`);
+                    });
+                }
+                
                 this.matchingStats.unmatchedRaces.push(raceInfo);
                 return null;
             }
@@ -460,7 +526,7 @@ class SmarterSigScraper {
 
     async processRaceData(raceData) {
         console.log(`\n🔄 Processing ${raceData.length} races for Supabase integration...`);
-        console.log(`📅 Looking for races on: ${this.todaysDate}`);
+        console.log(`📅 Looking for races on TODAY'S DATE: ${this.todaysDate}`);
 
         // Debug: List all races in the database for the target date
         let allRacesInDb = [];
@@ -483,6 +549,7 @@ class SmarterSigScraper {
                 });
             } else {
                 console.log(`\n⚠️ No races found in database for date: ${this.todaysDate}`);
+                console.log(`⚠️ THIS IS A CRITICAL ERROR - there should be races in the database for today!`);
             }
         } catch (error) {
             console.log(`❌ Error checking races: ${error.message}`);
@@ -523,18 +590,18 @@ class SmarterSigScraper {
                     console.log(`❌ UNMATCHED RACE DETAILS:`);
                     console.log(`   - Race info: ${race.raceInfo}`);
                     console.log(`   - Parsed course: ${parsed.course}`);
-                    console.log(`   - Parsed time: ${parsed.time}`);
+                    console.log(`   - Parsed time: ${parsed.time12h}`);
                     
                     // Try to find similar races in the database
                     console.log(`   - Similar races in database:`);
                     const similarCourses = allRacesInDb.filter(dbRace => 
-                        this.cleanCourseName(dbRace.course).includes(parsed.course) || 
-                        parsed.course.includes(this.cleanCourseName(dbRace.course))
+                        this.cleanCourseName(dbRace.course).includes(this.cleanCourseName(parsed.course)) || 
+                        this.cleanCourseName(parsed.course).includes(this.cleanCourseName(dbRace.course))
                     );
                     
                     if (similarCourses.length > 0) {
                         similarCourses.forEach(similar => {
-                            console.log(`     * ${similar.course} at ${similar.off_time} (ID: ${similar.id})`);
+                            console.log(`     * ${similar.course} at ${similar.off_time} (ID: ${similar.race_id})`);
                         });
                     } else {
                         console.log(`     * No similar courses found`);
@@ -546,12 +613,12 @@ class SmarterSigScraper {
             }
         }
         
-        // Second pass - try to match unmatched races using context and horse names
+        // Second pass with improved fallback logic
         if (unmatchedRaces.length > 0) {
             console.log(`\n🔍 Attempting to match ${unmatchedRaces.length} unmatched races using fallback method...`);
             
             // Get remaining unmatched races in database
-            const remainingRaces = allRacesInDb.filter(race => !processedRaceIds.has(race.id));
+            const remainingRaces = allRacesInDb.filter(race => !processedRaceIds.has(race.race_id));
             console.log(`   - ${remainingRaces.length} unmatched races in database`);
             
             // Convert raceData to an array for easier indexing
@@ -615,15 +682,26 @@ class SmarterSigScraper {
                     }
                 }
                 
-                // Filter races by possible courses
+                // Filter races by possible courses, but use the mapping to handle aliases
                 let candidateRaces = remainingRaces;
                 if (possibleCourses.size > 0) {
                     candidateRaces = remainingRaces.filter(race => {
-                        const cleanCourse = this.cleanCourseName(race.course).toLowerCase();
-                        return Array.from(possibleCourses).some(course => 
-                            cleanCourse.includes(course.toLowerCase()) || 
-                            course.toLowerCase().includes(cleanCourse)
-                        );
+                        const cleanDbCourse = this.cleanCourseName(race.course);
+                        
+                        return Array.from(possibleCourses).some(sourceCourse => {
+                            const cleanedSourceCourse = this.cleanCourseName(sourceCourse);
+                            
+                            // Direct match
+                            if (cleanDbCourse === cleanedSourceCourse) return true;
+                            
+                            // Check against mappings
+                            if (this.courseMapping[cleanedSourceCourse] && 
+                                this.courseMapping[cleanedSourceCourse].includes(cleanDbCourse)) {
+                                return true;
+                            }
+                            
+                            return false;
+                        });
                     });
                     
                     console.log(`   - Filtered to ${candidateRaces.length} races from possible courses: ${Array.from(possibleCourses).join(', ')}`);
@@ -631,10 +709,21 @@ class SmarterSigScraper {
                 
                 // If we have a likely course, prioritize those races
                 if (likelyCourse) {
-                    const likelyCourseRaces = candidateRaces.filter(race => 
-                        this.cleanCourseName(race.course).toLowerCase().includes(likelyCourse.toLowerCase()) ||
-                        likelyCourse.toLowerCase().includes(this.cleanCourseName(race.course).toLowerCase())
-                    );
+                    const cleanedLikelyCourse = this.cleanCourseName(likelyCourse);
+                    const likelyCourseRaces = candidateRaces.filter(race => {
+                        const cleanDbCourse = this.cleanCourseName(race.course);
+                        
+                        // Direct match
+                        if (cleanDbCourse === cleanedLikelyCourse) return true;
+                        
+                        // Check against mappings
+                        if (this.courseMapping[cleanedLikelyCourse] && 
+                            this.courseMapping[cleanedLikelyCourse].includes(cleanDbCourse)) {
+                            return true;
+                        }
+                        
+                        return false;
+                    });
                     
                     if (likelyCourseRaces.length > 0) {
                         candidateRaces = likelyCourseRaces;
@@ -647,13 +736,13 @@ class SmarterSigScraper {
                     const prevParsed = this.parseRaceInfo(previousRace.raceInfo);
                     const nextParsed = this.parseRaceInfo(nextRace.raceInfo);
                     
-                    if (prevParsed && nextParsed && prevParsed.time && nextParsed.time) {
+                    if (prevParsed && nextParsed && prevParsed.time12h && nextParsed.time12h) {
                         // Convert times to minutes for comparison
-                        const prevTimeMinutes = this.timeToMinutes(prevParsed.time);
-                        const nextTimeMinutes = this.timeToMinutes(nextParsed.time);
+                        const prevTimeMinutes = this.timeToMinutes(prevParsed.time12h);
+                        const nextTimeMinutes = this.timeToMinutes(nextParsed.time12h);
                         
                         if (prevTimeMinutes && nextTimeMinutes) {
-                            console.log(`   - Time range: between ${prevParsed.time} and ${nextParsed.time}`);
+                            console.log(`   - Time range: between ${prevParsed.time12h} and ${nextParsed.time12h}`);
                             
                             // Find races that fall between these times
                             const betweenTimeRaces = candidateRaces.filter(race => {
@@ -665,7 +754,7 @@ class SmarterSigScraper {
                             
                             if (betweenTimeRaces.length > 0) {
                                 candidateRaces = betweenTimeRaces;
-                                console.log(`   - Found ${betweenTimeRaces.length} races between ${prevParsed.time} and ${nextParsed.time}`);
+                                console.log(`   - Found ${betweenTimeRaces.length} races between ${prevParsed.time12h} and ${nextParsed.time12h}`);
                             }
                         }
                     }
@@ -681,7 +770,7 @@ class SmarterSigScraper {
                     const { data: runners, error } = await this.supabase
                         .from('runners')
                         .select('id, horse_name')
-                        .eq('race_id', dbRace.id);
+                        .eq('race_id', dbRace.race_id);
                         
                     if (error || !runners) continue;
                     
@@ -708,17 +797,17 @@ class SmarterSigScraper {
                     }
                 }
                 
-                // If we found a good match (at least 40% of horses match)
-                if (bestMatch && bestMatchScore >= 40) {
-                    console.log(`✅ FOUND POTENTIAL MATCH: ${bestMatch.course} ${bestMatch.off_time} (ID: ${bestMatch.id})`);
+                // If we found a good match (at least 30% of horses match)
+                if (bestMatch && bestMatchScore >= 30) {
+                    console.log(`✅ FOUND POTENTIAL MATCH: ${bestMatch.course} ${bestMatch.off_time} (ID: ${bestMatch.race_id})`);
                     console.log(`   - Match confidence: ${bestMatchScore.toFixed(1)}%`);
                     console.log(`   - Matched ${Math.round(bestMatchScore * bestMatchRace.length / 100)} of ${bestMatchRace.length} horses`);
                     
                     // Process this match
-                    processedRaceIds.add(bestMatch.id); // Mark as processed
+                    processedRaceIds.add(bestMatch.race_id); // Mark as processed
                     
                     // Match horses in this race
-                    const matchedHorses = await this.matchHorsesInSupabase(bestMatch.id, unmatchedRace);
+                    const matchedHorses = await this.matchHorsesInSupabase(bestMatch.race_id, unmatchedRace);
                     
                     // Insert matched horses into pace_figs table
                     if (matchedHorses.length > 0) {
@@ -727,7 +816,7 @@ class SmarterSigScraper {
                         
                         // Remove from unmatched races
                         const index = this.matchingStats.unmatchedRaces.findIndex(
-                            r => r === "INVALID: Empty race info"
+                            r => r === "INVALID: Empty race info" || r === unmatchedRace.raceInfo
                         );
                         if (index !== -1) {
                             this.matchingStats.unmatchedRaces.splice(index, 1);

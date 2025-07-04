@@ -1,28 +1,35 @@
-name: SmarterSig Pace Data Scraper
+name: SmarterSig Pace Figures Scraper
 
 on:
   schedule:
-    - cron: '5 7 * * *'  # 07:05 AM UK time (GMT)
-    - cron: '5 9 * * *'  # 09:05 AM UK time (GMT)
+    # Run at 07:05 and 09:05 AM UK time daily (early morning)
+    - cron: '5 7,9 * * *'
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
-  scrape:
+  scrape-pace-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install puppeteer @supabase/supabase-js
+        run: npm ci
+
+      - name: Install Puppeteer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgbm-dev gconf-service libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils wget
 
       - name: Run SmarterSig scraper
         run: node smartersig-scraper.js
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NODE_ENV: production 
