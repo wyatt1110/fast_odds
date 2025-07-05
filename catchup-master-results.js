@@ -11,10 +11,24 @@ const PASSWORD = 'T5BoPivL3Q2h6RhCdLv4EwZu';
 
 console.log('🔄 CATCHUP MASTER RESULTS: Processing historical dates');
 
-// CATCHUP DATES - Edit these dates for historical data processing
-const CATCHUP_DATES = [
-  '2025-06-17'  // Processing June 17th to catch up on missing timeform and jockey data
-];
+// Get date from command line argument or use default dates
+const getTargetDates = () => {
+  const args = process.argv.slice(2);
+  if (args.length > 0) {
+    // Use command line argument
+    const targetDate = args[0];
+    console.log(`📅 Using command line date: ${targetDate}`);
+    return [targetDate];
+  } else {
+    // Use default dates if no argument provided
+    console.log(`📅 Using default dates`);
+    return [
+      '2025-06-17'  // Processing June 17th to catch up on missing timeform and jockey data
+    ];
+  }
+};
+
+const CATCHUP_DATES = getTargetDates();
 
 // Enhanced API request with proper pagination and error handling
 const fetchRacingResults = async (date, maxRetries = 3) => {
