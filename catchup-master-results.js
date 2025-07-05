@@ -13,7 +13,7 @@ console.log('🔄 CATCHUP MASTER RESULTS: Processing historical dates');
 
 // CATCHUP DATES - Edit these dates for historical data processing
 const CATCHUP_DATES = [
-  '2025-06-17'  // Processing June 17th when the BSP script was broken
+  '2025-06-17'  // Processing June 17th to catch up on missing timeform and jockey data
 ];
 
 // Enhanced API request with proper pagination and error handling
@@ -227,6 +227,31 @@ const getTimeformData = async (raceId, horseId) => {
   }
 };
 
+// Get pace figures data from supabase - SPECIAL HANDLING for horse_id
+const getPaceFigsData = async (raceId, horseId) => {
+  try {
+    // Extract numeric part from horse_id (remove 'hrs_' prefix)
+    const numericHorseId = horseId.replace(/^hrs_/, '');
+    
+    const { data, error } = await supabase
+      .from('pace_figs')
+      .select('*')
+      .eq('race_id', raceId)
+      .eq('horse_id', numericHorseId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.log(`⚠️  Pace_figs data error for ${horseId} (${numericHorseId}): ${error.message}`);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.log(`⚠️  Pace_figs data exception for ${horseId}: ${error.message}`);
+    return null;
+  }
+};
+
 // Helper function to extract numeric value from adjusted timeform figures
 const extractNumericFromAdj = (adjValue) => {
   if (!adjValue) return null;
@@ -344,7 +369,7 @@ const calculateDerivedFields = (runner, oddsData) => {
 };
 
 // Complete master results row builder matching new schema
-const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData, timeformData) => {
+const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData, timeformData, paceFigsData) => {
   const derivedFields = calculateDerivedFields(runner, oddsData);
   const timeformAverages = calculateTimeformAverages(timeformData);
   
@@ -494,6 +519,12 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     avr_tfig: timeformAverages.avr_tfig,
     lto_tfr: timeformAverages.lto_tfr,
     avr_tfr: timeformAverages.avr_tfr,
+    
+    // Pace Figures Data (from pace_figs table)
+    pace_fig: paceFigsData?.pace_figure || null,
+    pace_fig_lto: paceFigsData?.pace_figure_lto || null,
+    pace_style: paceFigsData?.pace_style || null,
+    race_average_pace: paceFigsData?.race_average || null,
     
     // Derived fields
     ...derivedFields
@@ -649,21 +680,23 @@ const processResults = async (results, isUpdate, targetDate) => {
         try {
           // Attempt full data retrieval and processing
           const raceData = await getRaceData(race.race_id);
-          const [runnerData, oddsData, bspData, timeformData] = await Promise.all([
+          const [runnerData, oddsData, bspData, timeformData, paceFigsData] = await Promise.all([
             getRunnerData(race.race_id, runner.horse_id),
             getOddsData(race.race_id, runner.horse_id),
             getBspData(runner.horse, race.date, race.region),
-            getTimeformData(race.race_id, runner.horse_id)
+            getTimeformData(race.race_id, runner.horse_id),
+            getPaceFigsData(race.race_id, runner.horse_id)
           ]);
           
           // Try to build complete row
-          resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData, timeformData);
+          resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData, timeformData, paceFigsData);
           
           const dataStatus = [
             runnerData ? 'Runner✅' : 'Runner❌',
             oddsData ? 'Odds✅' : 'Odds❌', 
             bspData ? 'BSP✅' : 'BSP❌',
-            timeformData ? 'Timeform✅' : 'Timeform❌'
+            timeformData ? 'Timeform✅' : 'Timeform❌',
+            paceFigsData ? 'PaceFigs✅' : 'PaceFigs❌'
           ].join(' ');
           console.log(`📊 ${runner.horse}: ${dataStatus}`);
           

@@ -298,6 +298,31 @@ const getTimeformData = async (raceId, horseId) => {
   }
 };
 
+// Get pace figures data from supabase - SPECIAL HANDLING for horse_id
+const getPaceFigsData = async (raceId, horseId) => {
+  try {
+    // Extract numeric part from horse_id (remove 'hrs_' prefix)
+    const numericHorseId = horseId.replace(/^hrs_/, '');
+    
+    const { data, error } = await supabase
+      .from('pace_figs')
+      .select('*')
+      .eq('race_id', raceId)
+      .eq('horse_id', numericHorseId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.warn(`⚠️  Error fetching pace_figs data for ${horseId} (${numericHorseId}) in race ${raceId}:`, error.message);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.warn(`⚠️  Exception fetching pace_figs data for ${horseId} in race ${raceId}:`, error.message);
+    return null;
+  }
+};
+
 // Helper function to extract numeric value from adjusted timeform figures
 const extractNumericFromAdj = (adjValue) => {
   if (!adjValue) return null;
@@ -556,7 +581,7 @@ const calculateDerivedFields = (runner, results, runnerData, oddsData) => {
 };
 
 // Build complete master results row with all available data
-const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData, timeformData) => {
+const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bspData, timeformData, paceFigsData) => {
   const derivedFields = calculateDerivedFields(runner, race, runnerData, oddsData);
   const timeformAverages = calculateTimeformAverages(timeformData);
   
@@ -793,6 +818,12 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     lto_tfr: timeformAverages.lto_tfr,
     avr_tfr: timeformAverages.avr_tfr,
     
+    // Pace Figures Data (from pace_figs table)
+    pace_fig: paceFigsData?.pace_figure || null,
+    pace_fig_lto: paceFigsData?.pace_figure_lto || null,
+    pace_style: paceFigsData?.pace_style || null,
+    race_average_pace: paceFigsData?.race_average || null,
+    
     // Derived ML Fields
     ...derivedFields
   };
@@ -929,12 +960,13 @@ const processResults = async (results, isUpdate = false) => {
         }
         
         // Fetch all supplementary data
-        const [raceData, runnerData, oddsData, bspData, timeformData] = await Promise.all([
+        const [raceData, runnerData, oddsData, bspData, timeformData, paceFigsData] = await Promise.all([
           getRaceData(race.race_id),
           getRunnerData(race.race_id, runner.horse_id),
           getOddsData(race.race_id, runner.horse_id),
           getBspData(runner.horse, race.date, race.region),
-          getTimeformData(race.race_id, runner.horse_id)
+          getTimeformData(race.race_id, runner.horse_id),
+          getPaceFigsData(race.race_id, runner.horse_id)
         ]);
         
         // Log data availability with matching format from error logs
@@ -956,6 +988,9 @@ const processResults = async (results, isUpdate = false) => {
         if (timeformData) dataAvailable.push('timeform_data');
         else { dataMissing.push('timeform_data'); }
         
+        if (paceFigsData) dataAvailable.push('pace_figs_data');
+        else { dataMissing.push('pace_figs_data'); }
+        
         console.log(`📊 ${runner.horse}:`);
         if (dataAvailable.length > 0) {
           console.log(`   ✅ Found: ${dataAvailable.join(', ')}`);
@@ -965,7 +1000,7 @@ const processResults = async (results, isUpdate = false) => {
         }
         
         // Build master results row with available data
-        const resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData, timeformData);
+        const resultRow = buildMasterResultsRow(race, runner, raceData, runnerData, oddsData, bspData, timeformData, paceFigsData);
         
         // Insert/update the record
         const success = await insertMasterResult(resultRow, exists && (isUpdate || needsUpdate));
