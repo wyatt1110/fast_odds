@@ -298,27 +298,24 @@ const getTimeformData = async (raceId, horseId) => {
   }
 };
 
-// Get pace figures data from supabase - SPECIAL HANDLING for horse_id
-const getPaceFigsData = async (raceId, horseId) => {
+// Get pace figures data from supabase - MATCH BY HORSE NAME (not horse_id due to different ID systems)
+const getPaceFigsData = async (raceId, horseName) => {
   try {
-    // Extract numeric part from horse_id (remove 'hrs_' prefix)
-    const numericHorseId = horseId.replace(/^hrs_/, '');
-    
     const { data, error } = await supabase
       .from('pace_figs')
       .select('*')
       .eq('race_id', raceId)
-      .eq('horse_id', numericHorseId)
+      .eq('horse_name', horseName)
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      console.warn(`⚠️  Error fetching pace_figs data for ${horseId} (${numericHorseId}) in race ${raceId}:`, error.message);
+      console.warn(`⚠️  Error fetching pace_figs data for ${horseName} in race ${raceId}:`, error.message);
       return null;
     }
 
     return data;
   } catch (error) {
-    console.warn(`⚠️  Exception fetching pace_figs data for ${horseId} in race ${raceId}:`, error.message);
+    console.warn(`⚠️  Exception fetching pace_figs data for ${horseName} in race ${raceId}:`, error.message);
     return null;
   }
 };
@@ -912,7 +909,8 @@ const processResults = async (results, isUpdate = false) => {
     race_data: 0,
     runner_data: 0,
     odds_data: 0,
-    bsp_data: 0
+    bsp_data: 0,
+    pace_figs_data: 0
   };
 
   console.log(`\n🔄 Processing ${results.results?.length || 0} races...`);
@@ -966,7 +964,7 @@ const processResults = async (results, isUpdate = false) => {
           getOddsData(race.race_id, runner.horse_id),
           getBspData(runner.horse, race.date, race.region),
           getTimeformData(race.race_id, runner.horse_id),
-          getPaceFigsData(race.race_id, runner.horse_id)
+          getPaceFigsData(race.race_id, runner.horse)
         ]);
         
         // Log data availability with matching format from error logs
@@ -989,7 +987,7 @@ const processResults = async (results, isUpdate = false) => {
         else { dataMissing.push('timeform_data'); }
         
         if (paceFigsData) dataAvailable.push('pace_figs_data');
-        else { dataMissing.push('pace_figs_data'); }
+        else { dataMissing.push('pace_figs_data'); missingDataCounts.pace_figs_data++; }
         
         console.log(`📊 ${runner.horse}:`);
         if (dataAvailable.length > 0) {
@@ -1037,6 +1035,7 @@ const processResults = async (results, isUpdate = false) => {
   console.log(`❌ Missing runner_data (not found in database): ${missingDataCounts.runner_data} horses`);
   console.log(`❌ Missing odds_data (not found in database): ${missingDataCounts.odds_data} horses`);
   console.log(`❌ Missing bsp_data (not found in database): ${missingDataCounts.bsp_data} horses`);
+  console.log(`❌ Missing pace_figs_data (not found in database): ${missingDataCounts.pace_figs_data} horses`);
   console.log(`⚠️  Upsert was ${completionRate}% complete`);
   
   return {

@@ -241,27 +241,24 @@ const getTimeformData = async (raceId, horseId) => {
   }
 };
 
-// Get pace figures data from supabase - SPECIAL HANDLING for horse_id
-const getPaceFigsData = async (raceId, horseId) => {
+// Get pace figures data from supabase - MATCH BY HORSE NAME (not horse_id due to different ID systems)
+const getPaceFigsData = async (raceId, horseName) => {
   try {
-    // Extract numeric part from horse_id (remove 'hrs_' prefix)
-    const numericHorseId = horseId.replace(/^hrs_/, '');
-    
     const { data, error } = await supabase
       .from('pace_figs')
       .select('*')
       .eq('race_id', raceId)
-      .eq('horse_id', numericHorseId)
+      .eq('horse_name', horseName)
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      console.log(`⚠️  Pace_figs data error for ${horseId} (${numericHorseId}): ${error.message}`);
+      console.log(`⚠️  Pace_figs data error for ${horseName}: ${error.message}`);
       return null;
     }
 
     return data;
   } catch (error) {
-    console.log(`⚠️  Pace_figs data exception for ${horseId}: ${error.message}`);
+    console.log(`⚠️  Pace_figs data exception for ${horseName}: ${error.message}`);
     return null;
   }
 };
@@ -699,7 +696,7 @@ const processResults = async (results, isUpdate, targetDate) => {
             getOddsData(race.race_id, runner.horse_id),
             getBspData(runner.horse, race.date, race.region),
             getTimeformData(race.race_id, runner.horse_id),
-            getPaceFigsData(race.race_id, runner.horse_id)
+            getPaceFigsData(race.race_id, runner.horse)
           ]);
           
           // Try to build complete row
