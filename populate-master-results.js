@@ -821,6 +821,9 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     pace_style: paceFigsData?.pace_style || null,
     race_average_pace: paceFigsData?.race_average || null,
     
+    // Predicted BSP Data (from runners table 7.8_bsp column)
+    predicted_bsp: runnerData?.["7.8_bsp"] || null,
+    
     // Derived ML Fields
     ...derivedFields
   };
@@ -988,6 +991,9 @@ const processResults = async (results, isUpdate = false) => {
         
         if (paceFigsData) dataAvailable.push('pace_figs_data');
         else { dataMissing.push('pace_figs_data'); missingDataCounts.pace_figs_data++; }
+        
+        if (runnerData?.["7.8_bsp"]) dataAvailable.push('predicted_bsp');
+        else { dataMissing.push('predicted_bsp'); }
         
         console.log(`📊 ${runner.horse}:`);
         if (dataAvailable.length > 0) {

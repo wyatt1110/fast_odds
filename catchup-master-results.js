@@ -537,6 +537,9 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     pace_style: paceFigsData?.pace_style || null,
     race_average_pace: paceFigsData?.race_average || null,
     
+    // Predicted BSP Data (from runners table 7.8_bsp column)
+    predicted_bsp: runnerData?.["7.8_bsp"] || null,
+    
     // Derived fields
     ...derivedFields
   };
@@ -707,7 +710,8 @@ const processResults = async (results, isUpdate, targetDate) => {
             oddsData ? 'Odds✅' : 'Odds❌', 
             bspData ? 'BSP✅' : 'BSP❌',
             timeformData ? 'Timeform✅' : 'Timeform❌',
-            paceFigsData ? 'PaceFigs✅' : 'PaceFigs❌'
+            paceFigsData ? 'PaceFigs✅' : 'PaceFigs❌',
+            runnerData?.["7.8_bsp"] ? 'PredictedBSP✅' : 'PredictedBSP❌'
           ].join(' ');
           console.log(`📊 ${runner.horse}: ${dataStatus}`);
           
@@ -877,6 +881,10 @@ const createBasicMasterResultRow = (race, runner) => {
     "5_moving_average": null,
     "20_moving_average": null,
     "60_moving_average": null,
+    
+    // Predicted BSP Data - set as null for basic row (will be populated later)
+    predicted_bsp: null,
+    
     // ... all other complex fields as null
   };
 };
@@ -891,7 +899,8 @@ const createMinimalMasterResultRow = (race, runner) => {
     race_date: race.date,
     position: runner.position,
     sp: runner.sp,
-    sp_dec: runner.sp_dec
+    sp_dec: runner.sp_dec,
+    predicted_bsp: null // Set as null for minimal row
   };
 };
 
