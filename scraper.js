@@ -22,11 +22,64 @@ class TimeformScraper {
   async initialize() {
     console.log('🚀 Initializing Timeform scraper...');
     
+    // Enhanced browser launch with anti-detection and cloud optimizations
+    const baseArgs = config.puppeteer.args || [];
+    const enhancedArgs = [
+      ...baseArgs,
+      '--disable-blink-features=AutomationControlled',
+      '--exclude-switches=enable-automation',
+      '--disable-extensions-file-access-check',
+      '--disable-extensions-http-throttling',
+      '--disable-extensions-except',
+      '--disable-hang-monitor',
+      '--disable-ipc-flooding-protection',
+      '--disable-popup-blocking',
+      '--disable-prompt-on-repost',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-first-run',
+      '--safebrowsing-disable-auto-update',
+      '--enable-automation=false',
+      '--password-store=basic',
+      '--use-mock-keychain',
+      // Additional cloud environment optimizations
+      '--disable-client-side-phishing-detection',
+      '--disable-component-extensions-with-background-pages',
+      '--disable-default-apps',
+      '--disable-desktop-notifications',
+      '--disable-extensions',
+      '--disable-features=TranslateUI',
+      '--disable-ipc-flooding-protection',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-background-timer-throttling',
+      '--force-color-profile=srgb',
+      '--disable-software-rasterizer',
+      '--disable-background-networking',
+      '--disable-field-trial-config',
+      '--disable-back-forward-cache',
+      '--enable-features=NetworkService,NetworkServiceInProcess',
+      '--force-fieldtrials=*BackgroundTracing/default/'
+    ];
+    
+    // Remove duplicate arguments
+    const uniqueArgs = [...new Set(enhancedArgs)];
+    
     this.browser = await puppeteer.launch({
       headless: config.puppeteer.headless,
       slowMo: config.puppeteer.slowMo,
-      args: config.puppeteer.args,
-      protocolTimeout: config.puppeteer.protocolTimeout
+      args: uniqueArgs,
+      protocolTimeout: config.puppeteer.protocolTimeout,
+      ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=AutomationControlled'],
+      ignoreHTTPSErrors: true,
+      // Additional cloud-friendly options
+      pipe: process.env.NODE_ENV === 'production', // Use pipe instead of websocket in production
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false
     });
     
     this.page = await this.browser.newPage();
@@ -35,11 +88,99 @@ class TimeformScraper {
     this.page.setDefaultTimeout(config.puppeteer.timeout);
     this.page.setDefaultNavigationTimeout(config.puppeteer.timeout);
     
-    // Set a realistic user agent
-    await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // Remove webdriver traces with comprehensive script
+    await this.page.evaluateOnNewDocument(() => {
+      // Remove webdriver property
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+      
+      // Remove automation indicators
+      delete window.navigator.__proto__.webdriver;
+      
+      // Mock plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      
+      // Mock languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en', 'en-GB'],
+      });
+      
+      // Mock permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+      
+      // Override chrome runtime
+      if (window.chrome) {
+        Object.defineProperty(window.chrome, 'runtime', {
+          get: () => undefined,
+        });
+      }
+      
+      // Mock screen properties to appear more realistic
+      Object.defineProperty(screen, 'colorDepth', {
+        get: () => 24,
+      });
+      
+      Object.defineProperty(screen, 'pixelDepth', {
+        get: () => 24,
+      });
+      
+      // Additional stealth measures
+      Object.defineProperty(navigator, 'platform', {
+        get: () => 'Win32',
+      });
+      
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 4,
+      });
+    });
     
-    // Set viewport
-    await this.page.setViewport({ width: 1920, height: 1080 });
+    // Set realistic user agent with version randomization
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    ];
+    const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+    await this.page.setUserAgent(randomUserAgent);
+    console.log(`🎭 Using User Agent: ${randomUserAgent}`);
+    
+    // Set realistic viewport with slight randomization
+    const viewports = [
+      { width: 1920, height: 1080 },
+      { width: 1366, height: 768 },
+      { width: 1440, height: 900 },
+      { width: 1536, height: 864 },
+      { width: 1280, height: 720 }
+    ];
+    const randomViewport = viewports[Math.floor(Math.random() * viewports.length)];
+    await this.page.setViewport(randomViewport);
+    console.log(`📐 Using Viewport: ${randomViewport.width}x${randomViewport.height}`);
+    
+    // Set comprehensive headers
+    await this.page.setExtraHTTPHeaders({
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Accept-Language': 'en-US,en;q=0.9,en-GB;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Cache-Control': 'max-age=0',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"'
+    });
 
     // Listen for console messages from the browser context
     this.page.on('console', msg => {
@@ -48,86 +189,353 @@ class TimeformScraper {
       }
     });
     
-    console.log('✅ Browser initialized');
+    // Optimized request interception for better performance
+    await this.page.setRequestInterception(true);
+    this.page.on('request', (req) => {
+      const resourceType = req.resourceType();
+      const url = req.url();
+      
+      // Block unnecessary resources but allow essential ones
+      if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
+        req.abort();
+      } else if (resourceType === 'script' && (url.includes('analytics') || url.includes('tracking') || url.includes('ads'))) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+    
+    console.log('✅ Browser initialized with enhanced anti-detection measures');
   }
 
   async login() {
     console.log('🔐 Logging into Timeform...');
     console.log(`DEBUG: NODE_ENV = ${process.env.NODE_ENV}`);
     
-    try {
-      // Navigate to racecards page directly for login
-      await this.page.goto(config.timeform.racecardsUrl, { 
-        waitUntil: 'networkidle2',
-        timeout: config.puppeteer.timeout 
-      });
+    // Add better user agent and anti-detection
+    await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await this.page.setViewport({ width: 1366, height: 768 });
+    
+    // Set additional headers to appear more like a real browser
+    await this.page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-GB,en;q=0.9,en-US;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+    });
+    
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        console.log(`🔄 Login attempt ${retryCount + 1}/${maxRetries}`);
+        
+        // Navigate to racecards page directly for login
+        await this.page.goto(config.timeform.racecardsUrl, { 
+          waitUntil: 'networkidle2',
+          timeout: config.puppeteer.timeout 
+        });
 
-      // Look for sign in button/link
-      const signInSelector = 'a[href*="/account/sign-in"]';
-      await this.page.waitForSelector(signInSelector, { timeout: config.puppeteer.timeout });
-      
-      // Add a small delay to ensure element is fully interactive
-      await delay(1000);
+        // Add random delay to appear more human-like
+        await delay(2000 + Math.random() * 3000);
 
-      // Click sign in using evaluate for more robustness
-      await this.page.evaluate((selector) => {
-        document.querySelector(selector)?.click();
-      }, signInSelector);
-      
-      // Take screenshot and save HTML immediately after sign-in click (only in development)
-      const isProduction = process.env.NODE_ENV === 'production';
-      console.log(`DEBUG: isProduction = ${isProduction}, skipping screenshots in production`);
-      
-      if (!isProduction) {
-        console.log('Taking screenshot in development mode...');
-        await this.page.screenshot({ path: 'login-step1-after-signin-click.png', fullPage: true });
-        const htmlAfterSignInClick = await this.page.content();
-        fs.writeFileSync('login-after-signin-click.html', htmlAfterSignInClick);
-        console.log('Page HTML after sign-in click saved to login-after-signin-click.html');
-      }
-
-      // Wait for email input (assuming login form appears on the new login page)
-      const emailSelector = 'input[id="EmailAddress"]';
-      await this.page.waitForSelector(emailSelector, { timeout: config.puppeteer.timeout });
-      await this.page.type(emailSelector, config.timeform.email);
-      if (!isProduction) {
-        console.log('Taking email screenshot in development mode...');
-        await this.page.screenshot({ path: 'login-step2-after-email.png', fullPage: true });
-      }
-
-      // Wait for password input
-      const passwordSelector = 'input[id="Password"]';
-      await this.page.waitForSelector(passwordSelector, { timeout: config.puppeteer.timeout });
-      await this.page.type(passwordSelector, config.timeform.password);
-      if (!isProduction) {
-        console.log('Taking password screenshot in development mode...');
-        await this.page.screenshot({ path: 'login-step3-after-password.png', fullPage: true });
-      }
-
-      // Submit login form
-      const submitSelector = 'input[type="submit"][value="Sign In"]';
-      await this.page.click(submitSelector);
-      
-      // Wait for a common element on the page after successful login, or wait for the login form to disappear.
-      // For now, let's wait for the login form to disappear, or a new element that indicates successful login.
-      // Example: wait for 'My Account' link or a specific element on the racecards page after login redirects.
-      await this.page.waitForFunction(() => {
-        return document.querySelector('input[id="EmailAddress"]') === null;
-      }, { timeout: config.puppeteer.timeout });
-      console.log('✅ Login successful!');
-
-    } catch (error) {
-      console.error('❌ Login failed:', error.message);
-      const isProduction = process.env.NODE_ENV === 'production';
-      if (!isProduction) {
-        console.log('Taking error screenshot in development mode...');
-        try {
-          await this.page.screenshot({ path: 'login-failed.png', fullPage: true });
-        } catch (screenshotError) {
-          console.error('Failed to take error screenshot:', screenshotError.message);
+        // Look for sign in button/link with multiple selectors
+        const signInSelectors = [
+          'a[href*="/account/sign-in"]',
+          'a[href*="sign-in"]',
+          '.sign-in-link',
+          'a:contains("Sign In")',
+          'a:contains("Log In")',
+          'a:contains("Login")'
+        ];
+        
+        let signInElement = null;
+        for (const selector of signInSelectors) {
+          try {
+            await this.page.waitForSelector(selector, { timeout: 10000 });
+            signInElement = await this.page.$(selector);
+            if (signInElement) {
+              console.log(`✅ Found sign-in element with selector: ${selector}`);
+              break;
+            }
+          } catch (e) {
+            console.log(`⚠️ Selector ${selector} not found, trying next...`);
+          }
         }
+        
+        if (!signInElement) {
+          throw new Error('Could not find sign-in button with any selector');
+        }
+        
+        // Add a small delay to ensure element is fully interactive
+        await delay(1000);
+
+        // Click sign in using evaluate for more robustness
+        await this.page.evaluate((selector) => {
+          const element = document.querySelector(selector);
+          if (element) {
+            element.click();
+          }
+        }, signInSelectors.find(sel => signInElement));
+        
+        // Take screenshot and save HTML immediately after sign-in click (only in development)
+        const isProduction = process.env.NODE_ENV === 'production';
+        console.log(`DEBUG: isProduction = ${isProduction}, skipping screenshots in production`);
+        
+        if (!isProduction) {
+          console.log('Taking screenshot in development mode...');
+          await this.page.screenshot({ path: 'login-step1-after-signin-click.png', fullPage: true });
+          const htmlAfterSignInClick = await this.page.content();
+          fs.writeFileSync('login-after-signin-click.html', htmlAfterSignInClick);
+          console.log('Page HTML after sign-in click saved to login-after-signin-click.html');
+        }
+
+        // Wait for email input with multiple selectors
+        const emailSelectors = [
+          'input[id="EmailAddress"]',
+          'input[name="email"]',
+          'input[type="email"]',
+          'input[placeholder*="email" i]',
+          'input[placeholder*="Email" i]'
+        ];
+        
+        let emailInput = null;
+        for (const selector of emailSelectors) {
+          try {
+            await this.page.waitForSelector(selector, { timeout: 15000 });
+            emailInput = await this.page.$(selector);
+            if (emailInput) {
+              console.log(`✅ Found email input with selector: ${selector}`);
+              break;
+            }
+          } catch (e) {
+            console.log(`⚠️ Email selector ${selector} not found, trying next...`);
+          }
+        }
+        
+        if (!emailInput) {
+          throw new Error('Could not find email input field with any selector');
+        }
+        
+        // Clear and type email with human-like delays
+        await this.page.focus(emailSelectors.find(sel => emailInput));
+        await this.page.keyboard.down('Control');
+        await this.page.keyboard.press('KeyA');
+        await this.page.keyboard.up('Control');
+        await delay(500);
+        
+        // Type email character by character with random delays
+        for (const char of config.timeform.email) {
+          await this.page.keyboard.type(char);
+          await delay(50 + Math.random() * 100);
+        }
+        
+        if (!isProduction) {
+          console.log('Taking email screenshot in development mode...');
+          await this.page.screenshot({ path: 'login-step2-after-email.png', fullPage: true });
+        }
+
+        // Wait for password input with multiple selectors
+        const passwordSelectors = [
+          'input[id="Password"]',
+          'input[name="password"]',
+          'input[type="password"]',
+          'input[placeholder*="password" i]',
+          'input[placeholder*="Password" i]'
+        ];
+        
+        let passwordInput = null;
+        for (const selector of passwordSelectors) {
+          try {
+            await this.page.waitForSelector(selector, { timeout: 15000 });
+            passwordInput = await this.page.$(selector);
+            if (passwordInput) {
+              console.log(`✅ Found password input with selector: ${selector}`);
+              break;
+            }
+          } catch (e) {
+            console.log(`⚠️ Password selector ${selector} not found, trying next...`);
+          }
+        }
+        
+        if (!passwordInput) {
+          throw new Error('Could not find password input field with any selector');
+        }
+        
+        // Clear and type password with human-like delays
+        await this.page.focus(passwordSelectors.find(sel => passwordInput));
+        await this.page.keyboard.down('Control');
+        await this.page.keyboard.press('KeyA');
+        await this.page.keyboard.up('Control');
+        await delay(500);
+        
+        // Type password character by character with random delays
+        for (const char of config.timeform.password) {
+          await this.page.keyboard.type(char);
+          await delay(50 + Math.random() * 100);
+        }
+        
+        if (!isProduction) {
+          console.log('Taking password screenshot in development mode...');
+          await this.page.screenshot({ path: 'login-step3-after-password.png', fullPage: true });
+        }
+
+        // Submit login form with multiple approaches
+        const submitSelectors = [
+          'input[type="submit"][value="Sign In"]',
+          'input[type="submit"]',
+          'button[type="submit"]',
+          'button:contains("Sign In")',
+          'button:contains("Log In")',
+          'button:contains("Login")',
+          '.login-submit',
+          '.sign-in-submit'
+        ];
+        
+        let submitSuccess = false;
+        for (const selector of submitSelectors) {
+          try {
+            const submitElement = await this.page.$(selector);
+            if (submitElement) {
+              console.log(`✅ Found submit button with selector: ${selector}`);
+              await this.page.click(selector);
+              submitSuccess = true;
+              break;
+            }
+          } catch (e) {
+            console.log(`⚠️ Submit selector ${selector} not found, trying next...`);
+          }
+        }
+        
+        if (!submitSuccess) {
+          // Try pressing Enter as fallback
+          console.log('🔄 Trying Enter key as fallback...');
+          await this.page.keyboard.press('Enter');
+        }
+        
+        // Wait for login success with sequential detection (more reliable for cloud environments)
+        console.log('⏳ Waiting for login success indicators...');
+        
+        let loginSuccessMethod = null;
+        const detectionTimeout = 20000; // Shorter timeout per method
+        
+        // Try multiple detection methods sequentially instead of Promise.race
+        for (let i = 0; i < 6 && !loginSuccessMethod; i++) {
+          try {
+            console.log(`🔍 Login detection attempt ${i + 1}/6...`);
+            
+            switch (i) {
+              case 0:
+                // Method 1: Check if email field disappeared
+                await this.page.waitForFunction(() => {
+                  return document.querySelector('input[id="EmailAddress"]') === null;
+                }, { timeout: detectionTimeout });
+                loginSuccessMethod = 'email_field_disappeared';
+                break;
+                
+              case 1:
+                // Method 2: Check if any login form disappeared
+                await this.page.waitForFunction(() => {
+                  return document.querySelector('input[type="email"], input[id="EmailAddress"]') === null;
+                }, { timeout: detectionTimeout });
+                loginSuccessMethod = 'login_form_disappeared';
+                break;
+                
+              case 2:
+                // Method 3: Check URL doesn't contain login/sign-in
+                await this.page.waitForFunction(() => {
+                  const url = window.location.href.toLowerCase();
+                  return !url.includes('sign-in') && !url.includes('login');
+                }, { timeout: detectionTimeout });
+                loginSuccessMethod = 'url_changed';
+                break;
+                
+              case 3:
+                // Method 4: Wait for racecards page elements
+                await this.page.waitForSelector('.meeting-page__container, .w-racecard-grid', { timeout: detectionTimeout });
+                loginSuccessMethod = 'racecards_elements_found';
+                break;
+                
+              case 4:
+                // Method 5: Look for account/user elements
+                await this.page.waitForFunction(() => {
+                  return document.querySelector('a[href*="account"], .user-menu, .account-menu') !== null;
+                }, { timeout: detectionTimeout });
+                loginSuccessMethod = 'account_elements_found';
+                break;
+                
+              case 5:
+                // Method 6: Final fallback - just wait and check if we're not on login page
+                await delay(3000);
+                const currentUrl = await this.page.url();
+                if (!currentUrl.toLowerCase().includes('sign-in') && !currentUrl.toLowerCase().includes('login')) {
+                  loginSuccessMethod = 'final_url_check';
+                }
+                break;
+            }
+            
+            if (loginSuccessMethod) {
+              console.log(`✅ Login successful! Detection method: ${loginSuccessMethod}`);
+              break;
+            }
+            
+          } catch (detectionError) {
+            console.log(`⚠️ Detection method ${i + 1} failed: ${detectionError.message}`);
+            // Continue to next detection method
+            
+            // Add a small delay between detection attempts
+            await delay(1000);
+          }
+        }
+        
+        if (!loginSuccessMethod) {
+          // Final attempt: check current state manually
+          try {
+            const currentUrl = await this.page.url();
+            const hasEmailField = await this.page.$('input[id="EmailAddress"]');
+            
+            console.log(`🔍 Final state check - URL: ${currentUrl}, Has email field: ${hasEmailField !== null}`);
+            
+            if (!currentUrl.toLowerCase().includes('sign-in') && !currentUrl.toLowerCase().includes('login') && !hasEmailField) {
+              loginSuccessMethod = 'manual_state_check';
+              console.log(`✅ Login successful! Detection method: ${loginSuccessMethod}`);
+            } else {
+              throw new Error(`Login verification failed - URL: ${currentUrl}, Email field present: ${hasEmailField !== null}`);
+            }
+          } catch (finalCheckError) {
+            throw new Error(`All login detection methods failed. Final check error: ${finalCheckError.message}`);
+          }
+        }
+        
+        return; // Success, exit retry loop
+        
+      } catch (error) {
+        retryCount++;
+        console.error(`❌ Login attempt ${retryCount} failed:`, error.message);
+        
+        if (retryCount >= maxRetries) {
+          console.error('❌ All login attempts failed');
+          const isProduction = process.env.NODE_ENV === 'production';
+          if (!isProduction) {
+            console.log('Taking error screenshot in development mode...');
+            try {
+              await this.page.screenshot({ path: 'login-failed.png', fullPage: true });
+              const errorHtml = await this.page.content();
+              fs.writeFileSync('login-failed.html', errorHtml);
+            } catch (screenshotError) {
+              console.error('Failed to take error screenshot:', screenshotError.message);
+            }
+          }
+          throw error;
+        }
+        
+        // Wait before retry with exponential backoff
+        const backoffDelay = Math.min(5000 * Math.pow(2, retryCount - 1), 30000);
+        console.log(`⏳ Waiting ${backoffDelay}ms before retry...`);
+        await delay(backoffDelay);
       }
-      throw error;
     }
   }
 
