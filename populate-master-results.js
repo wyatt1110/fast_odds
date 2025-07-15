@@ -824,6 +824,11 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     // Predicted BSP Data (from runners table 7.8_bsp column)
     predicted_bsp: runnerData?.["7.8_bsp"] || null,
     
+    // New Model Data (from runners table)
+    predicted_raw: runnerData?.["7.8_raw"] || null,
+    winmodel_raw: runnerData?.win_model || null,
+    winmodel_adj: runnerData?.adj_win_model || null,
+    
     // Derived ML Fields
     ...derivedFields
   };
@@ -994,6 +999,15 @@ const processResults = async (results, isUpdate = false) => {
         
         if (runnerData?.["7.8_bsp"]) dataAvailable.push('predicted_bsp');
         else { dataMissing.push('predicted_bsp'); }
+        
+        if (runnerData?.["7.8_raw"]) dataAvailable.push('predicted_raw');
+        else { dataMissing.push('predicted_raw'); }
+        
+        if (runnerData?.win_model) dataAvailable.push('winmodel_raw');
+        else { dataMissing.push('winmodel_raw'); }
+        
+        if (runnerData?.adj_win_model) dataAvailable.push('winmodel_adj');
+        else { dataMissing.push('winmodel_adj'); }
         
         console.log(`📊 ${runner.horse}:`);
         if (dataAvailable.length > 0) {

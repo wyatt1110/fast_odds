@@ -540,6 +540,11 @@ const buildMasterResultsRow = (race, runner, raceData, runnerData, oddsData, bsp
     // Predicted BSP Data (from runners table 7.8_bsp column)
     predicted_bsp: runnerData?.["7.8_bsp"] || null,
     
+    // New Model Data (from runners table)
+    predicted_raw: runnerData?.["7.8_raw"] || null,
+    winmodel_raw: runnerData?.win_model || null,
+    winmodel_adj: runnerData?.adj_win_model || null,
+    
     // Derived fields
     ...derivedFields
   };
@@ -711,7 +716,10 @@ const processResults = async (results, isUpdate, targetDate) => {
             bspData ? 'BSP✅' : 'BSP❌',
             timeformData ? 'Timeform✅' : 'Timeform❌',
             paceFigsData ? 'PaceFigs✅' : 'PaceFigs❌',
-            runnerData?.["7.8_bsp"] ? 'PredictedBSP✅' : 'PredictedBSP❌'
+            runnerData?.["7.8_bsp"] ? 'PredictedBSP✅' : 'PredictedBSP❌',
+            runnerData?.["7.8_raw"] ? 'PredictedRaw✅' : 'PredictedRaw❌',
+            runnerData?.win_model ? 'WinModelRaw✅' : 'WinModelRaw❌',
+            runnerData?.adj_win_model ? 'WinModelAdj✅' : 'WinModelAdj❌'
           ].join(' ');
           console.log(`📊 ${runner.horse}: ${dataStatus}`);
           
@@ -885,6 +893,11 @@ const createBasicMasterResultRow = (race, runner) => {
     // Predicted BSP Data - set as null for basic row (will be populated later)
     predicted_bsp: null,
     
+    // New Model Data - set as null for basic row (will be populated later)
+    predicted_raw: null,
+    winmodel_raw: null,
+    winmodel_adj: null,
+    
     // ... all other complex fields as null
   };
 };
@@ -900,7 +913,10 @@ const createMinimalMasterResultRow = (race, runner) => {
     position: runner.position,
     sp: runner.sp,
     sp_dec: runner.sp_dec,
-    predicted_bsp: null // Set as null for minimal row
+    predicted_bsp: null, // Set as null for minimal row
+    predicted_raw: null, // Set as null for minimal row
+    winmodel_raw: null, // Set as null for minimal row
+    winmodel_adj: null // Set as null for minimal row
   };
 };
 
