@@ -63,11 +63,11 @@ function isHorseNonRunner(horseName, nonRunnersText) {
 }
 
 /**
- * Main function to update OV signals results - OPTIMIZED VERSION
+ * Generic function to update signal results for any table - OPTIMIZED VERSION
  */
-async function updateOVSignalsResults() {
+async function updateSignalResults(tableName) {
     try {
-        console.log('🚀 Starting OPTIMIZED OV Signals Results Update...');
+        console.log(`🚀 Starting OPTIMIZED ${tableName.toUpperCase()} Results Update...`);
         
         // Calculate date range (last 3 calendar days including today)
         const today = getUKDate(0);
@@ -76,26 +76,36 @@ async function updateOVSignalsResults() {
         
         console.log(`📅 Processing races from last 3 days: ${dayBefore}, ${yesterday}, ${today}`);
         
-        // Step 1: Get incomplete entries from ov_signals for last 3 days only
-        console.log('📊 Fetching incomplete entries from ov_signals (last 3 days)...');
+        // Step 1: Get incomplete entries from specified table for last 3 days only
+        console.log(`📊 Fetching incomplete entries from ${tableName} (last 3 days)...`);
         const { data: incompleteEntries, error: fetchError } = await supabase
-            .from('ov_signals')
+            .from(tableName)
             .select('*')
             .or('result.eq.pending,result.is.null,bsp.is.null')
             .in('race_date', [today, yesterday, dayBefore])
             .order('race_date', { ascending: false });
         
         if (fetchError) {
-            console.error('❌ Error fetching incomplete entries:', fetchError);
-            return;
+            console.error(`❌ Error fetching incomplete entries from ${tableName}:`, fetchError);
+            return {
+                totalProcessed: 0,
+                totalUpdated: 0,
+                totalSkipped: 0,
+                tableName
+            };
         }
         
         if (!incompleteEntries || incompleteEntries.length === 0) {
-            console.log('✅ No incomplete entries found in the last 3 days. All entries are up to date.');
-            return;
+            console.log(`✅ No incomplete entries found in ${tableName} for the last 3 days. All entries are up to date.`);
+            return {
+                totalProcessed: 0,
+                totalUpdated: 0,
+                totalSkipped: 0,
+                tableName
+            };
         }
         
-        console.log(`📋 Found ${incompleteEntries.length} incomplete entries to process`);
+        console.log(`📋 Found ${incompleteEntries.length} incomplete entries to process in ${tableName}`);
         
         // Step 2: Group entries by unique horse_id + race_date combinations to avoid duplicate lookups
         const uniqueHorseRaceCombos = new Map();
@@ -132,7 +142,12 @@ async function updateOVSignalsResults() {
         
         if (masterError) {
             console.error('❌ Error fetching master results:', masterError);
-            return;
+            return {
+                totalProcessed: 0,
+                totalUpdated: 0,
+                totalSkipped: 0,
+                tableName
+            };
         }
         
         console.log(`📋 Found ${masterResultsBatch.length} master results entries`);
@@ -227,12 +242,12 @@ async function updateOVSignalsResults() {
             // Execute updates in parallel for this batch
             const updatePromises = batch.map(async ({ id, updateData }) => {
                 const { error } = await supabase
-                    .from('ov_signals')
+                    .from(tableName)
                     .update(updateData)
                     .eq('id', id);
                 
                 if (error) {
-                    console.error(`❌ Error updating entry ${id}:`, error);
+                    console.error(`❌ Error updating entry ${id} in ${tableName}:`, error);
                     return false;
                 }
                 return true;
@@ -246,7 +261,7 @@ async function updateOVSignalsResults() {
         }
         
         // Step 7: Summary
-        console.log('\n📊 OPTIMIZED Update Summary:');
+        console.log(`\n📊 OPTIMIZED ${tableName.toUpperCase()} Update Summary:`);
         console.log(`   - Total entries processed: ${totalProcessed}`);
         console.log(`   - Successfully updated: ${totalUpdated}`);
         console.log(`   - Skipped (no master data): ${totalSkipped}`);
@@ -255,15 +270,29 @@ async function updateOVSignalsResults() {
         console.log(`   - Database queries saved: ${incompleteEntries.length - uniqueHorseRaceCombos.size}`);
         
         if (totalUpdated > 0) {
-            console.log(`\n✅ Successfully updated ${totalUpdated} entries using optimized batch processing!`);
+            console.log(`\n✅ Successfully updated ${totalUpdated} entries in ${tableName} using optimized batch processing!`);
         } else {
-            console.log('\n⚠️  No entries were updated.');
+            console.log(`\n⚠️  No entries were updated in ${tableName}.`);
         }
         
+        return {
+            totalProcessed,
+            totalUpdated,
+            totalSkipped,
+            tableName
+        };
+        
     } catch (error) {
-        console.error('💥 Fatal error in updateOVSignalsResults:', error);
-        process.exit(1);
+        console.error(`💥 Fatal error in updateSignalResults for ${tableName}:`, error);
+        throw error;
     }
+}
+
+/**
+ * Legacy function for backward compatibility - now calls generic function
+ */
+async function updateOVSignalsResults() {
+    return await updateSignalResults('ov_signals');
 }
 
 /**
@@ -296,11 +325,31 @@ async function main() {
     const startTime = new Date();
     console.log(`🕐 Starting at: ${startTime.toISOString()}`);
     
+    let totalProcessedAll = 0;
+    let totalUpdatedAll = 0;
+    let totalSkippedAll = 0;
+    
     try {
-        // Step 1: Update individual bet results
-        await updateOVSignalsResults();
+        console.log('🎯 Starting dual table processing: ov_signals AND sharp_win_signals');
+        console.log('=' .repeat(80));
         
-        // Step 2: Refresh the aggregated results table
+        // Step 1: Update ov_signals results
+        console.log('\n📈 PROCESSING OV_SIGNALS TABLE');
+        console.log('-' .repeat(50));
+        const ovResults = await updateSignalResults('ov_signals');
+        totalProcessedAll += ovResults.totalProcessed;
+        totalUpdatedAll += ovResults.totalUpdated;
+        totalSkippedAll += ovResults.totalSkipped;
+        
+        // Step 2: Update sharp_win_signals results
+        console.log('\n🚀 PROCESSING SHARP_WIN_SIGNALS TABLE');
+        console.log('-' .repeat(50));
+        const sharpResults = await updateSignalResults('sharp_win_signals');
+        totalProcessedAll += sharpResults.totalProcessed;
+        totalUpdatedAll += sharpResults.totalUpdated;
+        totalSkippedAll += sharpResults.totalSkipped;
+        
+        // Step 3: Refresh the aggregated results table
         console.log('\n🔄 Refreshing aggregated results table...');
         await refreshResultsTable();
         
@@ -311,9 +360,17 @@ async function main() {
     
     const endTime = new Date();
     const duration = (endTime - startTime) / 1000;
-    console.log(`\n🕐 Completed at: ${endTime.toISOString()}`);
+    
+    console.log('\n' + '=' .repeat(80));
+    console.log('📊 FINAL SUMMARY - DUAL TABLE PROCESSING');
+    console.log('=' .repeat(80));
+    console.log(`🕐 Completed at: ${endTime.toISOString()}`);
     console.log(`⏱️  Total duration: ${duration.toFixed(2)} seconds`);
-    console.log(`🚀 Performance improvement: Batch processing with date filtering!`);
+    console.log(`📈 Total entries processed (both tables): ${totalProcessedAll}`);
+    console.log(`✅ Total entries updated (both tables): ${totalUpdatedAll}`);
+    console.log(`⚠️  Total entries skipped (both tables): ${totalSkippedAll}`);
+    console.log(`🚀 Performance improvement: Batch processing with dual table support!`);
+    console.log('=' .repeat(80));
 }
 
 // Run the script
