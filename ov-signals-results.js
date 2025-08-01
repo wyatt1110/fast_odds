@@ -330,7 +330,7 @@ async function main() {
     let totalSkippedAll = 0;
     
     try {
-        console.log('🎯 Starting dual table processing: ov_signals AND sharp_win_signals');
+        console.log('🎯 Starting triple table processing: ov_signals, sharp_win_signals, AND ov_bankers');
         console.log('=' .repeat(80));
         
         // Step 1: Update ov_signals results
@@ -349,6 +349,14 @@ async function main() {
         totalUpdatedAll += sharpResults.totalUpdated;
         totalSkippedAll += sharpResults.totalSkipped;
         
+        // Step 3: Update ov_bankers results
+        console.log('\n🏦 PROCESSING OV_BANKERS TABLE');
+        console.log('-' .repeat(50));
+        const bankersResults = await updateSignalResults('ov_bankers');
+        totalProcessedAll += bankersResults.totalProcessed;
+        totalUpdatedAll += bankersResults.totalUpdated;
+        totalSkippedAll += bankersResults.totalSkipped;
+        
         // Step 3: Refresh the aggregated results table
         console.log('\n🔄 Refreshing aggregated results table...');
         await refreshResultsTable();
@@ -362,14 +370,14 @@ async function main() {
     const duration = (endTime - startTime) / 1000;
     
     console.log('\n' + '=' .repeat(80));
-    console.log('📊 FINAL SUMMARY - DUAL TABLE PROCESSING');
+    console.log('📊 FINAL SUMMARY - TRIPLE TABLE PROCESSING');
     console.log('=' .repeat(80));
     console.log(`🕐 Completed at: ${endTime.toISOString()}`);
     console.log(`⏱️  Total duration: ${duration.toFixed(2)} seconds`);
-    console.log(`📈 Total entries processed (both tables): ${totalProcessedAll}`);
-    console.log(`✅ Total entries updated (both tables): ${totalUpdatedAll}`);
-    console.log(`⚠️  Total entries skipped (both tables): ${totalSkippedAll}`);
-    console.log(`🚀 Performance improvement: Batch processing with dual table support!`);
+    console.log(`📈 Total entries processed (all three tables): ${totalProcessedAll}`);
+    console.log(`✅ Total entries updated (all three tables): ${totalUpdatedAll}`);
+    console.log(`⚠️  Total entries skipped (all three tables): ${totalSkippedAll}`);
+    console.log(`🚀 Performance improvement: Batch processing with triple table support!`);
     console.log('=' .repeat(80));
 }
 
