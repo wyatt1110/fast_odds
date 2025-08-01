@@ -81,7 +81,7 @@ async function updateSignalResults(tableName) {
         const { data: incompleteEntries, error: fetchError } = await supabase
             .from(tableName)
             .select('*')
-            .or('result.eq.pending,result.is.null,bsp.is.null')
+            .or('result.eq.pending,result.eq.PENDING,result.is.null,bsp.is.null')
             .in('race_date', [today, yesterday, dayBefore])
             .order('race_date', { ascending: false });
         
@@ -320,7 +320,7 @@ async function main() {
     let totalSkippedAll = 0;
     
     try {
-        console.log('🎯 Starting triple table processing: ov_signals, sharp_win_signals, AND ov_bankers');
+        console.log('🎯 Starting triple table processing: ov_signals, sharp_win_signals, AND ov-bankers');
         console.log('=' .repeat(80));
         
         // Step 1: Update ov_signals results
@@ -339,10 +339,10 @@ async function main() {
         totalUpdatedAll += sharpResults.totalUpdated;
         totalSkippedAll += sharpResults.totalSkipped;
         
-        // Step 3: Update ov_bankers results
-        console.log('\n🏦 PROCESSING OV_BANKERS TABLE');
+        // Step 3: Update ov-bankers results
+        console.log('\n🏦 PROCESSING OV-BANKERS TABLE');
         console.log('-' .repeat(50));
-        const bankersResults = await updateSignalResults('ov_bankers');
+        const bankersResults = await updateSignalResults('ov-bankers');
         totalProcessedAll += bankersResults.totalProcessed;
         totalUpdatedAll += bankersResults.totalUpdated;
         totalSkippedAll += bankersResults.totalSkipped;
