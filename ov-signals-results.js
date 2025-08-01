@@ -169,16 +169,6 @@ async function updateSignalResults(tableName) {
             let masterResult = masterResultsMap.get(key);
             const relatedEntries = entryGroups.get(key);
             
-            // If no exact date match, try to find any result for this horse_id
-            if (!masterResult) {
-                // Look for any master result with this horse_id (fallback)
-                const horseFallback = masterResultsBatch.find(result => result.horse_id === combo.horse_id);
-                if (horseFallback) {
-                    masterResult = horseFallback;
-                    console.log(`🔄 Using fallback result for ${combo.horse_name}: expected date=${combo.race_date}, found date=${horseFallback.race_date}`);
-                }
-            }
-            
             if (!masterResult) {
                 console.log(`⚠️  No master result found for ${combo.horse_name} (${key})`);
                 totalSkipped += relatedEntries.length;
