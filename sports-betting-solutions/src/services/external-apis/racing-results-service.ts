@@ -1,8 +1,8 @@
 import axios from 'axios';
 
 const RACING_API_BASE_URL = 'https://api.theracingapi.com/v1';
-const RACING_API_USERNAME = 'KQ9W7rQeAHWMUgxH93ie3yEc';
-const RACING_API_PASSWORD = 'T5BoPivL3Q2h6RhCdLv4EwZu';
+const RACING_API_USERNAME = process.env.RACING_API_USERNAME || 'KQ9W7rQeAHWMUgxH93ie3yEc';
+const RACING_API_PASSWORD = process.env.RACING_API_PASSWORD || 'T5BoPivL3Q2h6RhCdLv4EwZu';
 
 interface RacingAPIRunner {
   horse: string;

@@ -29,12 +29,12 @@
   --primary-color: 59, 130, 246;
   --secondary-color: 156, 163, 175;
   --accent-color: 96, 165, 250;
-  --success-color: 52, 211, 153;
-  --warning-color: 251, 191, 36;
-  --error-color: 248, 113, 113;
-  --heading-color: 243, 244, 246;
-  --text-color: 209, 213, 219;
-  --muted-color: 156, 163, 175;
+  --success-color: 34, 197, 94;
+  --warning-color: 245, 158, 11;
+  --error-color: 239, 68, 68;
+  --heading-color: 209, 213, 219;
+  --text-color: 156, 163, 175;
+  --muted-color: 107, 114, 128;
 }
 
 /* Racing Theme */
@@ -113,18 +113,12 @@ body {
 
 /* Fade in animation */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.6s ease-out forwards;
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-in-out;
 }
 
 /* Pulse animation */
@@ -151,3 +145,46 @@ html {
 }
 
 /* Add any additional global styles here */ 
+
+/* Slide in from right animation for notifications */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out forwards;
+}
+
+/* Background Wallpaper Styling */
+.bg-wallpaper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/images/4815403F-8215-41A1-82C4-DF69A380400C.jpg');
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  z-index: -2;
+}
+
+/* Semi-transparent overlay for better readability */
+.bg-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(1px);
+  z-index: -1;
+} 

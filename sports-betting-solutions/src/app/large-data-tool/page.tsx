@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/frontend-ui/layouts/DashboardLayout';
 import { useUserProfile } from '@/hooks/useUserProfile';
+import PageProtection from '@/components/auth/PageProtection';
+import { MembershipTier } from '@/lib/permissions/access-control';
 import { supabase } from '@/lib/supabase/client';
 import { Calendar, Search, RotateCcw, TrendingUp, BarChart3, ChevronDown, Check, Database } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
@@ -171,12 +173,7 @@ export default function LargeDataToolPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [chartType, setChartType] = useState<'profitLoss' | 'clv'>('profitLoss');
 
-  // Access control
-  useEffect(() => {
-    if (!loading && !hasProAccess) {
-      router.push('/account');
-    }
-  }, [loading, hasProAccess, router]);
+  // Access control is now handled by PageProtection component
 
   // Fetch dropdown options on component mount - MODIFIED: Fetch ALL users' bets
   useEffect(() => {
@@ -556,16 +553,16 @@ export default function LargeDataToolPage() {
     };
   };
 
-  if (loading) {
-    return <DashboardLayout><div className="text-white">Loading...</div></DashboardLayout>;
-  }
-
-  if (!hasProAccess) {
-    return null;
-  }
+  // Loading and access control are handled by PageProtection component
 
   return (
     <DashboardLayout>
+      <PageProtection
+        requiredAuth={true}
+        minimumTier={MembershipTier.Premium}
+        redirectTo="/membership"
+        notificationMessage="You need a paid membership to access the Large Data Tool"
+      >
       <div className="min-h-screen bg-betting-dark text-white p-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-8">
@@ -959,6 +956,7 @@ export default function LargeDataToolPage() {
           )}
         </div>
       </div>
+      </PageProtection>
     </DashboardLayout>
   );
 } 

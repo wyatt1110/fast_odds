@@ -117,7 +117,7 @@ export default function BetSpreadsheet({ userId }: BetSpreadsheetProps) {
     : bets;
 
   // Get unique sports from bets
-  const sports = [...new Set(bets.map(bet => bet.sport))];
+  const sports = Array.from(new Set(bets.map(bet => bet.sport)));
 
   // Calculate totals
   const totalStake = filteredBets.reduce((sum, bet) => sum + bet.stake, 0);

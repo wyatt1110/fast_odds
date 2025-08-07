@@ -16,6 +16,13 @@ import {
   preloadTrackImages,
   TrackImageAssignment 
 } from "@/lib/services/trackImageService";
+// Import UK and Irish track lists
+import ukTrackList from "@/config/UK-Full-Track-List.json";
+import ireTrackList from "@/config/IRE-Full-Track-List.json";
+
+// Type the imported track lists
+const typedUkTrackList = ukTrackList as { trackNames: string[] };
+const typedIreTrackList = ireTrackList as { trackNames: string[] };
 
 const getRaceTypeColor = (raceType: string) => {
   switch (raceType) {
@@ -45,6 +52,9 @@ const formatRaceClassAndPattern = (raceClass: string | null, pattern: string | n
 export default function HorseRacingRacecards() {
   const [expandedTracks, setExpandedTracks] = useState<string[]>([]);
   const [tracks, setTracks] = useState<TrackData[]>([]);
+  const [ukTracks, setUkTracks] = useState<TrackData[]>([]);
+  const [ireTracks, setIreTracks] = useState<TrackData[]>([]);
+  const [internationalTracks, setInternationalTracks] = useState<TrackData[]>([]);
   const [stats, setStats] = useState<RacecardsStats>({
     totalTracks: 0,
     totalRaces: 0,
@@ -57,6 +67,96 @@ export default function HorseRacingRacecards() {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [trackImages, setTrackImages] = useState<TrackImageAssignment[]>([]);
   const [imagesLoading, setImagesLoading] = useState(true);
+
+  // Function to normalize track names for comparison
+  const normalizeTrackName = (name: string): string => {
+    return name
+      .toLowerCase()
+      .replace(/\s*\([^)]*\)/g, '') // Remove content in brackets (e.g., "(AW)", "(Flat)")
+      .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+      .trim();
+  };
+
+  // Function to calculate string similarity (Jaro-Winkler-like simple approach)
+  const calculateSimilarity = (str1: string, str2: string): number => {
+    const s1 = str1.toLowerCase();
+    const s2 = str2.toLowerCase();
+    
+    if (s1 === s2) return 1;
+    
+    const len1 = s1.length;
+    const len2 = s2.length;
+    
+    if (len1 === 0 || len2 === 0) return 0;
+    
+    // Simple similarity check - count matching characters in similar positions
+    let matches = 0;
+    const maxLen = Math.max(len1, len2);
+    
+    for (let i = 0; i < Math.min(len1, len2); i++) {
+      if (s1[i] === s2[i]) matches++;
+    }
+    
+    // Add points for common substrings
+    const commonSubstrings = [];
+    for (let i = 0; i < len1 - 2; i++) {
+      const substr = s1.substring(i, i + 3);
+      if (s2.includes(substr)) {
+        commonSubstrings.push(substr);
+      }
+    }
+    
+    const similarity = (matches / maxLen) + (commonSubstrings.length * 0.1);
+    return Math.min(similarity, 1);
+  };
+
+  // Function to check if a track is UK-based with fuzzy matching
+  const isUKTrack = (trackName: string): boolean => {
+    const normalizedTrackName = normalizeTrackName(trackName);
+    
+    // First try exact match after normalization
+    const normalizedUKTracks = typedUkTrackList.trackNames.map((name: string) => normalizeTrackName(name));
+    if (normalizedUKTracks.includes(normalizedTrackName)) {
+      return true;
+    }
+    
+    // Then try fuzzy matching with 70% threshold
+    for (const ukTrack of typedUkTrackList.trackNames) {
+      const normalizedUKTrack = normalizeTrackName(ukTrack);
+      const similarity = calculateSimilarity(normalizedTrackName, normalizedUKTrack);
+      
+      if (similarity >= 0.7) {
+        console.log(`UK fuzzy match found: "${trackName}" matches "${ukTrack}" with ${(similarity * 100).toFixed(1)}% similarity`);
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Function to check if a track is Irish-based with fuzzy matching
+  const isIrishTrack = (trackName: string): boolean => {
+    const normalizedTrackName = normalizeTrackName(trackName);
+    
+    // First try exact match after normalization
+    const normalizedIreTracks = typedIreTrackList.trackNames.map((name: string) => normalizeTrackName(name));
+    if (normalizedIreTracks.includes(normalizedTrackName)) {
+      return true;
+    }
+    
+    // Then try fuzzy matching with 70% threshold
+    for (const ireTrack of typedIreTrackList.trackNames) {
+      const normalizedIreTrack = normalizeTrackName(ireTrack);
+      const similarity = calculateSimilarity(normalizedTrackName, normalizedIreTrack);
+      
+      if (similarity >= 0.7) {
+        console.log(`Irish fuzzy match found: "${trackName}" matches "${ireTrack}" with ${(similarity * 100).toFixed(1)}% similarity`);
+        return true;
+      }
+    }
+    
+    return false;
+  };
 
   useEffect(() => {
     const fetchRaceData = async () => {
@@ -74,7 +174,15 @@ export default function HorseRacingRacecards() {
           getRacecardsStats()
         ]);
         
+        // Separate UK, Irish, and international tracks
+        const ukTracksData = tracksData.filter(track => isUKTrack(track.name));
+        const ireTracksData = tracksData.filter(track => !isUKTrack(track.name) && isIrishTrack(track.name));
+        const internationalTracksData = tracksData.filter(track => !isUKTrack(track.name) && !isIrishTrack(track.name));
+        
         setTracks(tracksData);
+        setUkTracks(ukTracksData);
+        setIreTracks(ireTracksData);
+        setInternationalTracks(internationalTracksData);
         setStats(statsData);
 
         // Fetch track images after we have track data
@@ -143,14 +251,7 @@ export default function HorseRacingRacecards() {
         <div className="min-h-screen bg-betting-dark text-white py-8 font-sans">
           <div className="max-w-7xl mx-auto px-4">
             <div className="mb-8">
-              <Link href="/horse-racing" className="inline-flex items-center text-betting-green hover:text-white mb-4 transition">
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Horse Racing Hub
-              </Link>
-              <h1 className="text-4xl font-heading text-betting-green mb-2">Today's Racecards</h1>
-              <p className="text-lg text-gray-300 max-w-3xl">
-                Loading today's race information...
-              </p>
+              <h1 className="text-5xl font-bold text-center mb-4 text-white">Today's Racecards</h1>
             </div>
             
             {/* Loading skeleton */}
@@ -184,11 +285,7 @@ export default function HorseRacingRacecards() {
         <div className="min-h-screen bg-betting-dark text-white py-8 font-sans">
           <div className="max-w-7xl mx-auto px-4">
             <div className="mb-8">
-              <Link href="/horse-racing" className="inline-flex items-center text-betting-green hover:text-white mb-4 transition">
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Horse Racing Hub
-              </Link>
-              <h1 className="text-4xl font-heading text-betting-green mb-2">Today's Racecards</h1>
+              <h1 className="text-5xl font-bold text-center mb-4 text-white">Today's Racecards</h1>
             </div>
             
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-8 text-center">
@@ -215,60 +312,7 @@ export default function HorseRacingRacecards() {
         <div className="min-h-screen bg-betting-dark text-white py-8 font-sans">
           <div className="max-w-7xl mx-auto px-4">
             <div className="mb-8">
-              <Link href="/horse-racing" className="inline-flex items-center text-betting-green hover:text-white mb-4 transition">
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Horse Racing Hub
-              </Link>
-              <h1 className="text-4xl font-heading text-betting-green mb-2">Today's Racecards</h1>
-              <p className="text-lg text-gray-300 max-w-3xl">
-                No races scheduled for today or all races have finished.
-              </p>
-            </div>
-            
-            {/* UK Date Debug Info */}
-            {ukDateInfo && (
-              <div className="mb-6">
-                <button 
-                  onClick={() => setShowDebugInfo(!showDebugInfo)}
-                  className="flex items-center text-sm text-gray-400 hover:text-betting-green transition"
-                >
-                  <Info size={16} className="mr-2" />
-                  {showDebugInfo ? 'Hide' : 'Show'} Date Info
-                </button>
-                
-                {showDebugInfo && (
-                  <div className="mt-2 bg-gray-800/50 border border-gray-600 rounded-lg p-4 text-sm">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-gray-400">UK Time:</span>
-                        <span className="ml-2 text-white">{new Date(ukDateInfo.ukTime).toLocaleString('en-GB')}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400">Race Date:</span>
-                        <span className="ml-2 text-betting-green">{ukDateInfo.raceDate}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400">After Cutoff:</span>
-                        <span className="ml-2 text-white">{ukDateInfo.isAfterCutoff ? 'Yes' : 'No (before 00:30)'}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            <div className="bg-betting-green/10 border border-betting-green/30 rounded-xl p-8 text-center">
-              <Trophy size={48} className="text-betting-green mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-betting-green mb-2">No Races Today</h3>
-              <p className="text-gray-300 mb-4">
-                There are currently no active races scheduled for {ukDateInfo?.raceDate || 'today'}. Check back tomorrow for new racecards.
-              </p>
-              <Link 
-                href="/horse-racing" 
-                className="bg-betting-green text-white px-6 py-2 rounded-lg hover:bg-betting-secondary transition inline-block"
-              >
-                Explore Horse Racing Hub
-              </Link>
+              <h1 className="text-5xl font-bold text-center mb-4 text-white">Today's Racecards</h1>
             </div>
           </div>
         </div>
@@ -278,151 +322,341 @@ export default function HorseRacingRacecards() {
 
   return (
     <Layout>
-      <div className="min-h-screen bg-betting-dark text-white py-8 font-sans">
-        <div className="max-w-7xl mx-auto px-4">
-          {/* Header */}
+      <div 
+        className="min-h-screen bg-betting-dark text-white py-8 font-sans"
+      >
+        
+        <div className="max-w-7xl mx-auto px-4 relative z-10">
           <div className="mb-8">
-            <Link href="/horse-racing" className="inline-flex items-center text-betting-green hover:text-white mb-4 transition">
-              <ArrowLeft size={20} className="mr-2" />
-              Back to Horse Racing Hub
-            </Link>
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-4xl font-heading text-betting-green mb-2">Today's Racecards</h1>
-                <p className="text-lg text-gray-300 max-w-3xl">
-                  Complete race information for all today's meetings. View runners, form, and betting odds for every race.
-                </p>
-                {ukDateInfo && (
-                  <p className="text-sm text-gray-400 mt-2">
-                    Showing races for: <span className="text-betting-green font-semibold">{ukDateInfo.raceDate}</span>
-                  </p>
-                )}
-              </div>
+            <h1 className="text-5xl font-bold text-center mb-4 text-white" style={{textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>Today's Racecards</h1>
+          </div>
+          
+          {/* Quick Overview Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-betting-green/30 rounded-lg p-6 text-center shadow-lg transform hover:scale-105 transition-all duration-200" style={{boxShadow: '0 10px 15px -3px rgba(46, 206, 96, 0.2), 0 4px 6px -4px rgba(46, 206, 96, 0.2)'}}>
+              <div className="text-3xl font-bold text-betting-green mb-1">{stats.totalTracks}</div>
+              <div className="text-sm text-white font-medium">Tracks</div>
+            </div>
+            <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-betting-green/30 rounded-lg p-6 text-center shadow-lg transform hover:scale-105 transition-all duration-200" style={{boxShadow: '0 10px 15px -3px rgba(46, 206, 96, 0.2), 0 4px 6px -4px rgba(46, 206, 96, 0.2)'}}>
+              <div className="text-3xl font-bold text-betting-green mb-1">{stats.totalRaces}</div>
+              <div className="text-sm text-white font-medium">Races</div>
+            </div>
+            <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-betting-green/30 rounded-lg p-6 text-center shadow-lg transform hover:scale-105 transition-all duration-200" style={{boxShadow: '0 10px 15px -3px rgba(46, 206, 96, 0.2), 0 4px 6px -4px rgba(46, 206, 96, 0.2)'}}>
+              <div className="text-3xl font-bold text-betting-green mb-1">{stats.totalRunners}</div>
+              <div className="text-sm text-white font-medium">Runners</div>
+            </div>
+            <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-betting-green/30 rounded-lg p-6 text-center shadow-lg transform hover:scale-105 transition-all duration-200" style={{boxShadow: '0 10px 15px -3px rgba(46, 206, 96, 0.2), 0 4px 6px -4px rgba(46, 206, 96, 0.2)'}}>
+              <div className="text-3xl font-bold text-betting-green mb-1">{stats.totalPrizeMoney}</div>
+              <div className="text-sm text-white font-medium">Prize Money</div>
+            </div>
+          </div>
+          
+          {/* UK Racing Section */}
+          {ukTracks.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold text-white mb-6 flex items-center">
+                <span className="mr-3">🇬🇧</span>
+                UK Racing
+                <span className="ml-3 text-lg text-gray-400">({ukTracks.length} tracks)</span>
+              </h2>
               
-              {/* UK Date Debug Info */}
-              {ukDateInfo && (
-                <div className="text-right">
-                  <button 
-                    onClick={() => setShowDebugInfo(!showDebugInfo)}
-                    className="flex items-center text-sm text-gray-400 hover:text-betting-green transition"
+              <div className="space-y-6">
+                {ukTracks.map((track) => {
+              const trackSummary = getTrackSummary(track);
+              const isExpanded = expandedTracks.includes(track.name);
+              const trackImage = getTrackImage(track.name);
+              
+              return (
+                <div key={track.name} className="bg-betting-dark border border-betting-green/20 rounded-xl shadow-lg overflow-hidden">
+                  {/* Track Header */}
+                  <div 
+                    className="p-6 cursor-pointer"
+                    onClick={() => toggleTrack(track.name)}
+                    style={{
+                      backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.7)), url(${trackImage})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }}
                   >
-                    <Info size={16} className="mr-2" />
-                    {showDebugInfo ? 'Hide' : 'Show'} Date Info
-                  </button>
-                  
-                  {showDebugInfo && (
-                    <div className="mt-2 bg-gray-800/50 border border-gray-600 rounded-lg p-4 text-sm text-left">
-                      <div className="space-y-2">
-                        <div>
-                          <span className="text-gray-400">UK Time:</span>
-                          <span className="ml-2 text-white">{new Date(ukDateInfo.ukTime).toLocaleString('en-GB')}</span>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h2 className="text-2xl font-heading text-white" style={{textShadow: '1px 1px 3px rgba(0,0,0,0.9)'}}>{track.name}</h2>
+                        <div className="flex items-center gap-6 mt-2 text-sm text-white">
+                          <div className="flex items-center">
+                            <Clock size={16} className="mr-2 text-betting-green" />
+                            First race: {trackSummary.firstRaceTime}
+                          </div>
+                          <div className="flex items-center">
+                            <Trophy size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.raceCount} races
+                          </div>
+                          <div className="flex items-center">
+                            <Users size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.totalRunners} runners
+                          </div>
+                          <div className="flex items-center">
+                            <MapPin size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.totalPrizeMoney}
+                            <br />prize money
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-gray-400">Race Date:</span>
-                          <span className="ml-2 text-betting-green">{ukDateInfo.raceDate}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">After Cutoff:</span>
-                          <span className="ml-2 text-white">{ukDateInfo.isAfterCutoff ? 'Yes' : 'No (before 00:30)'}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">Track Images:</span>
-                          <span className="ml-2 text-white">{trackImages.length} loaded</span>
+                      </div>
+                      <div className="text-white">
+                        {isExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded Race Details */}
+                  {isExpanded && (
+                    <div className="px-6 pb-6">
+                      <div className="border-t border-betting-green/20 pt-6">
+                        <div className="grid gap-4">
+                          {track.races.map((race, i) => (
+                            <div key={race.race_id} className="bg-betting-green/5 border border-betting-green/10 rounded-lg p-4 hover:bg-betting-green/10 transition">
+                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-3 mb-2">
+                                    <div className="bg-betting-green/20 text-betting-green px-3 py-1 rounded-lg font-mono font-bold">
+                                      {race.time}
+                                    </div>
+                                    <div className={`px-2 py-1 rounded border text-xs font-semibold ${getRaceTypeColor(race.raceType)}`}>
+                                      {race.raceType}
+                                    </div>
+                                    {(race.race_class || race.pattern) && (
+                                      <div className="px-2 py-1 rounded border text-xs font-semibold bg-orange-500/20 text-orange-400 border-orange-500/30">
+                                        {formatRaceClassAndPattern(race.race_class, race.pattern)}
+                                      </div>
+                                    )}
+                                    {race.big_race && (
+                                      <div className="px-2 py-1 rounded border text-xs font-semibold bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                                        BIG RACE
+                                      </div>
+                                    )}
+                                  </div>
+                                  <h3 className="text-lg font-semibold text-white mb-1">{race.name}</h3>
+                                  <div className="flex items-center gap-4 text-sm text-gray-400">
+                                    <div className="flex items-center">
+                                      <Clock size={14} className="mr-1" />
+                                      {race.distance}
+                                    </div>
+                                    <div className="flex items-center">
+                                      <Trophy size={14} className="mr-1" />
+                                      {race.prize}
+                                    </div>
+                                    <div className="flex items-center">
+                                      <Users size={14} className="mr-1" />
+                                      {race.runners} runners
+                                    </div>
+                                    {race.going && race.going !== 'Unknown' && (
+                                      <div className="flex items-center">
+                                        <span className="mr-1">Going:</span>
+                                        <span className="text-betting-green">{race.going}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Link 
+                                    href={`/horse-racing/racecards/handicap-cards/${race.race_id}`}
+                                    className="bg-betting-green text-white px-4 py-2 rounded-lg hover:bg-betting-secondary transition font-semibold text-sm"
+                                  >
+                                    View Racecard
+                                  </Link>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>
                   )}
                 </div>
-              )}
+              );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <div className="bg-betting-green/10 border border-betting-green/30 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-betting-green">{stats.totalTracks}</div>
-              <div className="text-sm text-gray-300">Active Tracks</div>
-            </div>
-            <div className="bg-betting-green/10 border border-betting-green/30 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-betting-green">{stats.totalRaces}</div>
-              <div className="text-sm text-gray-300">Total Races</div>
-            </div>
-            <div className="bg-betting-green/10 border border-betting-green/30 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-betting-green">{stats.totalRunners}</div>
-              <div className="text-sm text-gray-300">Total Runners</div>
-            </div>
-            <div className="bg-betting-green/10 border border-betting-green/30 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-betting-green">{stats.totalPrizeMoney}</div>
-              <div className="text-sm text-gray-300">Prize Money</div>
-            </div>
-          </div>
-
-          {/* Racecards */}
-          <div className="space-y-6">
-            {tracks.map((track) => {
-              const summary = getTrackSummary(track);
+          {/* Irish Racing Section */}
+          {ireTracks.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold text-white mb-6 flex items-center">
+                <span className="mr-3">🇮🇪</span>
+                Irish Racing
+                <span className="ml-3 text-lg text-gray-400">({ireTracks.length} tracks)</span>
+              </h2>
+              
+              <div className="space-y-6">
+                {ireTracks.map((track) => {
+              const trackSummary = getTrackSummary(track);
               const isExpanded = expandedTracks.includes(track.name);
-              const trackImageUrl = getTrackImage(track.name);
+              const trackImage = getTrackImage(track.name);
               
               return (
-                <div key={track.name} className="bg-betting-dark border border-betting-green/20 rounded-xl shadow-lg">
-                  {/* Track Summary Header */}
+                <div key={track.name} className="bg-betting-dark border border-betting-green/20 rounded-xl shadow-lg overflow-hidden">
+                  {/* Track Header */}
                   <div 
-                    className="p-6 cursor-pointer hover:bg-betting-green/5 transition rounded-xl"
+                    className="p-6 cursor-pointer"
                     onClick={() => toggleTrack(track.name)}
+                    style={{
+                      backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.7)), url(${trackImage})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        {/* Track Image */}
-                        <div className="w-16 h-16 mr-4 rounded-lg overflow-hidden bg-gray-700 flex-shrink-0">
-                          {imagesLoading ? (
-                            <div className="w-full h-full bg-betting-green/20 animate-pulse flex items-center justify-center">
-                              <MapPin size={20} className="text-betting-green" />
-                            </div>
-                          ) : (
-                            <img 
-                              src={trackImageUrl}
-                              alt={`${track.name} racing`}
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.src = '/images/fallback-track.jpg';
-                              }}
-                            />
-                          )}
-                        </div>
-                        
-                        <div>
-                          <h2 className="text-2xl font-heading text-betting-green">{track.name}</h2>
-                          <div className="flex items-center gap-6 mt-2 text-sm text-gray-300">
-                            <div className="flex items-center">
-                              <Clock size={14} className="mr-1 text-betting-green" />
-                              First race: {summary.firstRaceTime}
-                            </div>
-                            <div className="flex items-center">
-                              <Trophy size={14} className="mr-1 text-betting-green" />
-                              {summary.raceCount} races
-                            </div>
-                            <div className="flex items-center">
-                              <Users size={14} className="mr-1 text-betting-green" />
-                              {summary.totalRunners} runners
-                            </div>
-                            <div className="flex items-center">
-                              <span className="text-betting-green font-semibold">{summary.totalPrizeMoney}</span>
-                              <span className="ml-1">prize money</span>
-                            </div>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h2 className="text-2xl font-heading text-white" style={{textShadow: '1px 1px 3px rgba(0,0,0,0.9)'}}>{track.name}</h2>
+                        <div className="flex items-center gap-6 mt-2 text-sm text-white">
+                          <div className="flex items-center">
+                            <Clock size={16} className="mr-2 text-betting-green" />
+                            First race: {trackSummary.firstRaceTime}
+                          </div>
+                          <div className="flex items-center">
+                            <Trophy size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.raceCount} races
+                          </div>
+                          <div className="flex items-center">
+                            <Users size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.totalRunners} runners
+                          </div>
+                          <div className="flex items-center">
+                            <MapPin size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.totalPrizeMoney}
+                            <br />prize money
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-sm text-gray-400 text-right">
-                          <div>Click to {isExpanded ? 'hide' : 'view'} races</div>
+                      <div className="text-white">
+                        {isExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded Race Details */}
+                  {isExpanded && (
+                    <div className="px-6 pb-6">
+                      <div className="border-t border-betting-green/20 pt-6">
+                        <div className="grid gap-4">
+                          {track.races.map((race, i) => (
+                            <div key={race.race_id} className="bg-betting-green/5 border border-betting-green/10 rounded-lg p-4 hover:bg-betting-green/10 transition">
+                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-3 mb-2">
+                                    <div className="bg-betting-green/20 text-betting-green px-3 py-1 rounded-lg font-mono font-bold">
+                                      {race.time}
+                                    </div>
+                                    <div className={`px-2 py-1 rounded border text-xs font-semibold ${getRaceTypeColor(race.raceType)}`}>
+                                      {race.raceType}
+                                    </div>
+                                    {(race.race_class || race.pattern) && (
+                                      <div className="px-2 py-1 rounded border text-xs font-semibold bg-orange-500/20 text-orange-400 border-orange-500/30">
+                                        {formatRaceClassAndPattern(race.race_class, race.pattern)}
+                                      </div>
+                                    )}
+                                    {race.big_race && (
+                                      <div className="px-2 py-1 rounded border text-xs font-semibold bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                                        BIG RACE
+                                      </div>
+                                    )}
+                                  </div>
+                                  <h3 className="text-lg font-semibold text-white mb-1">{race.name}</h3>
+                                  <div className="flex items-center gap-4 text-sm text-gray-400">
+                                    <div className="flex items-center">
+                                      <Clock size={14} className="mr-1" />
+                                      {race.distance}
+                                    </div>
+                                    <div className="flex items-center">
+                                      <Trophy size={14} className="mr-1" />
+                                      {race.prize}
+                                    </div>
+                                    <div className="flex items-center">
+                                      <Users size={14} className="mr-1" />
+                                      {race.runners} runners
+                                    </div>
+                                    {race.going && race.going !== 'Unknown' && (
+                                      <div className="flex items-center">
+                                        <span className="mr-1">Going:</span>
+                                        <span className="text-betting-green">{race.going}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Link 
+                                    href={`/horse-racing/racecards/handicap-cards/${race.race_id}`}
+                                    className="bg-betting-green text-white px-4 py-2 rounded-lg hover:bg-betting-secondary transition font-semibold text-sm"
+                                  >
+                                    View Racecard
+                                  </Link>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        {isExpanded ? (
-                          <ChevronUp size={24} className="text-betting-green" />
-                        ) : (
-                          <ChevronDown size={24} className="text-betting-green" />
-                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* International Racing Section */}
+          {internationalTracks.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold text-white mb-6 flex items-center">
+                <span className="mr-3">🌍</span>
+                International Racing
+                <span className="ml-3 text-lg text-gray-400">({internationalTracks.length} tracks)</span>
+              </h2>
+              
+              <div className="space-y-6">
+            {internationalTracks.map((track) => {
+              const trackSummary = getTrackSummary(track);
+              const isExpanded = expandedTracks.includes(track.name);
+              const trackImage = getTrackImage(track.name);
+              
+              return (
+                <div key={track.name} className="bg-betting-dark border border-betting-green/20 rounded-xl shadow-lg overflow-hidden">
+                  {/* Track Header */}
+                  <div 
+                    className="p-6 cursor-pointer"
+                    onClick={() => toggleTrack(track.name)}
+                    style={{
+                      backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.7)), url(${trackImage})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h2 className="text-2xl font-heading text-white" style={{textShadow: '1px 1px 3px rgba(0,0,0,0.9)'}}>{track.name}</h2>
+                        <div className="flex items-center gap-6 mt-2 text-sm text-white">
+                          <div className="flex items-center">
+                            <Clock size={16} className="mr-2 text-betting-green" />
+                            First race: {trackSummary.firstRaceTime}
+                          </div>
+                          <div className="flex items-center">
+                            <Trophy size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.raceCount} races
+                          </div>
+                          <div className="flex items-center">
+                            <Users size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.totalRunners} runners
+                          </div>
+                          <div className="flex items-center">
+                            <MapPin size={16} className="mr-2 text-betting-green" />
+                            {trackSummary.totalPrizeMoney}
+                            <br />prize money
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-white">
+                        {isExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
                       </div>
                     </div>
                   </div>
@@ -494,25 +728,9 @@ export default function HorseRacingRacecards() {
                 </div>
               );
             })}
-          </div>
-
-          {/* Premium Features Banner */}
-          <div className="mt-12 bg-gradient-to-r from-betting-green/10 to-betting-dark/80 border border-betting-green/30 rounded-xl p-8">
-            <div className="text-center">
-              <h3 className="text-2xl font-heading text-betting-green mb-4">Unlock Premium Race Analysis</h3>
-              <p className="text-gray-300 mb-6 max-w-2xl mx-auto">
-                Get detailed form analysis, speed figures, trainer/jockey statistics, and AI-powered predictions for every race with Turf Tracker Premium.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link href="/turf-tracker" className="bg-betting-green text-white px-8 py-3 rounded-lg hover:bg-betting-secondary transition font-semibold">
-                  Upgrade to Premium
-                </Link>
-                <Link href="/horse-racing/data" className="border border-betting-green text-betting-green px-8 py-3 rounded-lg hover:bg-betting-green hover:text-white transition font-semibold">
-                  View Free Data
-                </Link>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </Layout>

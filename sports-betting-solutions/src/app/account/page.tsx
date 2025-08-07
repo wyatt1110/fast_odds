@@ -126,22 +126,30 @@ export default function Account() {
   
   useEffect(() => {
     const fetchUserData = async () => {
-      const currentUser = await getCurrentUser();
-      setUser(currentUser);
-      
-      if (currentUser) {
-        // Fetch user profile from user_profiles table
-        const { data: profile, error } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('user_id', currentUser.id)
-          .single();
-          
-        if (profile) {
-          setUserProfile(profile);
-        } else if (error && error.code !== 'PGRST116') {
-          console.error('Error fetching profile:', error);
+      try {
+        const currentUser = await getCurrentUser();
+        console.log('Current user:', currentUser);
+        setUser(currentUser);
+        
+        if (currentUser) {
+          // Fetch user profile from user_profiles table
+          const { data: profile, error } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .single();
+            
+          if (profile) {
+            console.log('User profile found:', profile);
+            setUserProfile(profile);
+          } else if (error && error.code !== 'PGRST116') {
+            console.error('Error fetching profile:', error);
+          }
+        } else {
+          console.log('No current user found');
         }
+      } catch (error) {
+        console.error('Error in fetchUserData:', error);
       }
       
       setLoading(false);
@@ -245,9 +253,9 @@ export default function Account() {
             <p className="text-gray-300">Manage your OddsVantage account and access premium tools</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Account Information */}
-            <Card className="bg-betting-dark border-betting-green/20 shadow-lg">
+            <Card className="bg-betting-dark border-betting-green/20 shadow-lg lg:col-span-2">
               <CardHeader className="bg-gradient-to-r from-betting-green/10 to-betting-green/5 py-4">
                 <CardTitle className="flex items-center text-white font-bold text-xl border-b-2 border-betting-green/40 pb-2 mb-0">
                   <User className="mr-3" size={24} />
@@ -311,51 +319,32 @@ export default function Account() {
               </CardContent>
             </Card>
 
-            {/* Premium Tools Access */}
+            {/* Quick Actions Sidebar */}
             <Card className="bg-betting-dark border-betting-green/20">
-              <CardHeader>
-                <CardTitle className="flex items-center text-white">
-                  <BarChart2 className="mr-2" size={20} />
-                  Premium Tools
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center text-white text-lg">
+                  <Settings className="mr-2" size={18} />
+                  Quick Actions
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-gray-300">
-                  Access your premium betting tools and analytics
-                </p>
-                
+              <CardContent className="space-y-3 pt-0">
                 <Button 
-                  className="w-full bg-betting-green hover:bg-betting-secondary text-white"
-                  onClick={() => router.push("/turf-tracker")}
+                  className="w-full bg-betting-green hover:bg-betting-secondary text-white py-2"
+                  onClick={() => router.push("/betting-dashboard")}
                 >
                   Launch Turf Tracker
                 </Button>
                 
-                <div className="pt-4 border-t border-betting-green/20">
-                  <h4 className="text-white font-medium mb-2">Available Tools:</h4>
-                  <ul className="text-gray-300 space-y-1 text-sm">
-                    <li>• Horse Racing Bet Tracker</li>
-                    <li>• Performance Analytics</li>
-                    <li>• ROI & Strike Rate Analysis</li>
-                    <li>• Race Data Integration</li>
-                    <li>• Premium Insights</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Quick Actions */}
-            <Card className="bg-betting-dark border-betting-green/20">
-              <CardHeader>
-                <CardTitle className="flex items-center text-white">
-                  <Settings className="mr-2" size={20} />
-                  Quick Actions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
+                <Button 
+                  className="w-full bg-gradient-to-r from-betting-green to-betting-secondary hover:from-betting-secondary hover:to-betting-green text-white py-2"
+                  onClick={() => router.push("/membership")}
+                >
+                  View Membership Tiers
+                </Button>
+                
                 <Button 
                   variant="outline" 
-                  className="w-full border-betting-green/20 text-white hover:bg-betting-green/10"
+                  className="w-full border-betting-green/20 text-white hover:bg-betting-green/10 py-2"
                   onClick={() => router.push("/account/details")}
                 >
                   Update Profile
@@ -363,7 +352,7 @@ export default function Account() {
                 
                 <Button 
                   variant="outline" 
-                  className="w-full border-betting-green/20 text-white hover:bg-betting-green/10"
+                  className="w-full border-betting-green/20 text-white hover:bg-betting-green/10 py-2"
                   onClick={() => router.push("/account/reset-password")}
                 >
                   Change Password
@@ -371,7 +360,7 @@ export default function Account() {
                 
                 <Button 
                   variant="outline" 
-                  className="w-full border-red-500/20 text-red-400 hover:bg-red-500/10"
+                  className="w-full border-red-500/20 text-red-400 hover:bg-red-500/10 py-2"
                   onClick={handleSignOut}
                 >
                   <LogOut size={16} className="mr-2" />
@@ -380,30 +369,7 @@ export default function Account() {
               </CardContent>
             </Card>
 
-            {/* Recent Activity */}
-            <Card className="bg-betting-dark border-betting-green/20">
-              <CardHeader>
-                <CardTitle className="text-white">Recent Activity</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center py-2 border-b border-betting-green/10">
-                    <span className="text-gray-300">Last Login</span>
-                    <span className="text-white text-sm">
-                      {user?.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleDateString() : 'Today'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-betting-green/10">
-                    <span className="text-gray-300">Turf Tracker Access</span>
-                    <span className="text-betting-green text-sm">Active</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span className="text-gray-300">Account Type</span>
-                    <span className="text-betting-green text-sm font-semibold">Premium</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+
           </div>
         </div>
       </div>

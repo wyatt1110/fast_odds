@@ -3,7 +3,7 @@
 import { useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { MembershipTier, getTierValue } from '@/lib/permissions/access-control';
+import { MembershipTier, getTierValue, compareTiers } from '@/lib/permissions/access-control';
 import AccessDeniedNotification from '@/components/ui/AccessDeniedNotification';
 
 interface PageProtectionProps {
@@ -71,7 +71,8 @@ export default function PageProtection({
           const userTierValue = getTierValue(profile?.membership_tier);
           
           // User is authorized if their tier is >= required tier (no expiration check)
-          const hasRequiredTier = userTierValue >= minimumTier;
+          // Use the compareTiers function for string-based comparison
+          const hasRequiredTier = compareTiers(userTierValue, minimumTier);
           
           if (!hasRequiredTier) {
             if (redirectTo) {

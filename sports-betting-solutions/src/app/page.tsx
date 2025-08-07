@@ -3,23 +3,34 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BarChart2, TrendingUp, Dumbbell } from 'lucide-react';
+import { ArrowRight, BarChart2, TrendingUp, Bell } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { getCurrentUser } from '@/lib/supabase/client';
+import { config } from '@/lib/config';
 
 export default function HomePage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     const checkUser = async () => {
       try {
+        console.log('🔍 Checking user authentication...');
+        console.log('🔧 Config check:', {
+          supabaseUrl: config.supabase.url ? '✅ Set' : '❌ Missing',
+          supabaseAnonKey: config.supabase.anonKey ? '✅ Set' : '❌ Missing',
+        });
+        
         const currentUser = await getCurrentUser();
+        console.log('👤 User check result:', currentUser ? 'User found' : 'No user');
         setUser(currentUser);
       } catch (error) {
-        console.error("Error checking user:", error);
+        console.error("❌ Error checking user:", error);
+        setError(error instanceof Error ? error.message : 'Unknown error');
       } finally {
+        console.log('✅ Authentication check complete');
         setLoading(false);
       }
     };
@@ -34,6 +45,26 @@ export default function HomePage() {
       router.push('/register');
     }
   };
+
+  // Show error state if there's an authentication error
+  if (error) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-screen bg-betting-dark">
+          <div className="text-center">
+            <h2 className="text-red-400 text-xl mb-4">Authentication Error</h2>
+            <p className="text-gray-300 mb-4">{error}</p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="bg-betting-green text-white px-4 py-2 rounded"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -50,7 +81,7 @@ export default function HomePage() {
                   Gain the <span className="text-betting-green">Edge</span> in Horse Racing
                 </h1>
                 <p className="text-lg md:text-xl text-gray-300 mb-8 animate-fade-in" style={{ animationDelay: "0.2s" }}>
-                  Professional betting tools and data analysis for serious players. Elevate your strategy with advanced insights and predictive analytics.
+                  +EV betting dashboard, Premium racecards, automation, data and tracking tools all at your fingertips!
                 </p>
                 <div className="flex flex-col sm:flex-row justify-center lg:justify-start gap-4 animate-fade-in" style={{ animationDelay: "0.4s" }}>
                   <button
@@ -80,11 +111,14 @@ export default function HomePage() {
         <section className="py-20 bg-gradient-to-b from-betting-dark to-betting-dark/95">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-16">
-              <h2 className="font-heading text-3xl md:text-4xl font-bold text-white mb-4">
-                Betting Intelligence Redefined
+              <h2 className="font-heading text-3xl md:text-4xl font-bold text-white mb-2">
+                Get an advantage in the betting markets
               </h2>
+              <p className="font-heading text-2xl md:text-3xl font-bold text-betting-green mb-4">
+                Become a sharp bettor
+              </p>
               <p className="text-gray-300 max-w-2xl mx-auto">
-                Our tools are crafted for professionals who expect excellence. Gain insights that others miss.
+                Gain access to our betting syndicate level tools and take your betting to the next level!
               </p>
             </div>
             
@@ -113,9 +147,6 @@ export default function HomePage() {
               <h2 className="font-heading text-3xl md:text-4xl font-bold text-white mb-4">
                 The Power of OddsVantage
               </h2>
-              <p className="text-gray-300">
-                See our premium dashboard and betting tools in action. Designed for serious players who demand excellence.
-              </p>
             </div>
             
             <div className="bg-betting-dark border border-betting-green/20 rounded-xl p-6 max-w-5xl mx-auto shadow-xl">
@@ -156,10 +187,10 @@ export default function HomePage() {
                     <ArrowRight size={16} className="ml-2" />
                   </button>
                   <Link
-                    href="/horse-racing"
+                    href="/membership"
                     className="inline-flex items-center justify-center rounded-md border border-betting-green px-6 py-3 text-base font-medium text-betting-green hover:bg-betting-green hover:text-white focus:outline-none focus:ring-2 focus:ring-betting-green"
                   >
-                    Explore Racing Data
+                    View Memberships
                   </Link>
                 </div>
               </div>
@@ -175,17 +206,17 @@ export default function HomePage() {
 const features = [
   {
     title: "Advanced Analytics",
-    description: "Comprehensive data analysis of racing forms, jockey performance, and course conditions.",
+    description: "Comprehensive data analytics on both your bets and thousands of both positive and negative EV bets, back test and visualise your betting models!",
     icon: BarChart2,
   },
   {
     title: "Market Trading Tools",
-    description: "Real-time odds comparison and market movement analysis for optimal value identification.",
+    description: "Our Premium Racecards have odds tracking and charting tools for predictive analytics.",
     icon: TrendingUp,
   },
   {
-    title: "Performance Tracking",
-    description: "Monitor your betting performance with detailed statistics and trend analysis.",
-    icon: Dumbbell,
+    title: "Profitable Betting Opportunities",
+    description: "Automated and AI powered machine learning betting models. Find +EV betting opportunities with fast alerts.",
+    icon: Bell,
   }
 ]; 

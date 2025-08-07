@@ -98,7 +98,8 @@ module.exports = {
       fontFamily: {
         sans: ['Montserrat', 'sans-serif'],
         heading: ['Playfair Display', 'serif'],
-        racing: ['Spartan', 'sans-serif']
+        racing: ['Spartan', 'sans-serif'],
+        horse: ['var(--font-outfit)', 'system-ui', 'sans-serif']
       },
       keyframes: {
         'accordion-down': {

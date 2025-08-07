@@ -1,13 +1,14 @@
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest } from 'next/server';
+import { config } from '@/lib/config';
 
 // Initialize Supabase client (server-side)
 const createServerSupabaseClient = () => {
   const cookieStore = cookies();
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      config.supabase.url,
+  config.supabase.anonKey,
     {
       auth: {
         persistSession: false
@@ -32,8 +33,8 @@ export async function getAuthenticatedUser(request: NextRequest) {
     }
     
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        config.supabase.url,
+  config.supabase.anonKey
     );
     
     const { data, error } = await supabase.auth.getUser(token);
@@ -58,8 +59,8 @@ export async function getAuthenticatedUser(request: NextRequest) {
 export async function getUserProfile(userId: string) {
   try {
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      config.supabase.url,
+      config.supabase.serviceKey
     );
     
     const { data: profile, error } = await supabase
@@ -86,8 +87,8 @@ export async function getUserProfile(userId: string) {
 export async function createNewUser(email: string, password: string, name?: string) {
   try {
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      config.supabase.url,
+      config.supabase.serviceKey
     );
     
     // Create the user in auth

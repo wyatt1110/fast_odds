@@ -2,23 +2,23 @@ import { NextResponse, NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthenticatedUser } from '@/lib/auth/auth-utils';
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { config } from '@/lib/config';
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
+// Initialize Supabase client
+const supabaseUrl = config.supabase.url;
+const supabaseServiceKey = config.supabase.serviceKey;
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 /**
  * GET handler to fetch a specific bet by ID
  */
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   try {
-    const betId = params.id;
+    const betId = id;
     
     // Authenticate user
     const user = await getAuthenticatedUser(request);
@@ -70,9 +70,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 /**
  * PUT handler to update an existing bet
  */
-export async function PUT(request: NextRequest, { params }: RouteParams) {
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   try {
-    const betId = params.id;
+    const betId = id;
     
     // Authenticate user
     const user = await getAuthenticatedUser(request);
@@ -221,9 +225,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 /**
  * DELETE handler to remove a bet
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   try {
-    const betId = params.id;
+    const betId = id;
     
     // Authenticate user
     const user = await getAuthenticatedUser(request);

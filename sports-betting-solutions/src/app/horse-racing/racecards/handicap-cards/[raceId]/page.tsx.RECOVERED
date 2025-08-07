@@ -1,0 +1,432 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { ArrowLeft, Clock, MapPin, DollarSign, Users, Eye, Star, Trophy, Zap } from 'lucide-react';
+import { racecardsService, Race, Runner } from '@/services/racecardsService';
+
+interface OddsData {
+  race_id: string;
+  runner_id: number;
+  horse_id: string;
+  bet365_opening: string | null;
+  william_hill_opening: string | null;
+  paddy_power_opening: string | null;
+  sky_bet_opening: string | null;
+  ladbrokes_opening: string | null;
+  coral_opening: string | null;
+  betfair_opening: string | null;
+  betfred_opening: string | null;
+  unibet_opening: string | null;
+  bet_victor_opening: string | null;
+  betfair_exchange_opening: string | null;
+}
+
+// Helper function to format weight from pounds to stones-pounds
+const formatWeight = (weightLbs: string | null): string => {
+  if (!weightLbs) return 'N/A';
+  const weightInPounds = parseInt(weightLbs);
+  if (isNaN(weightInPounds)) return weightLbs;
+  
+  const stones = Math.floor(weightInPounds / 14);
+  const pounds = weightInPounds % 14;
+  return `${stones}-${pounds}`;
+};
+
+// Helper function to parse and display form
+const parseForm = (form: string | null): JSX.Element[] => {
+  if (!form) return [];
+  
+  const positions = form.split('');
+  return positions.map((pos, index) => {
+    let colorClass = '';
+    if (pos === '1') colorClass = 'bg-yellow-500 text-black';
+    else if (pos === '2') colorClass = 'bg-gray-400 text-black';
+    else if (pos === '3') colorClass = 'bg-amber-600 text-white';
+    else if (pos === 'F') colorClass = 'bg-red-600 text-white';
+    else if (pos === 'U') colorClass = 'bg-red-500 text-white';
+    else if (pos === 'P') colorClass = 'bg-gray-600 text-white';
+    else colorClass = 'bg-blue-600 text-white';
+
+    return (
+      <span
+        key={index}
+        className={`inline-block w-6 h-6 text-xs font-bold rounded-full text-center leading-6 mr-1 ${colorClass}`}
+      >
+        {pos}
+      </span>
+    );
+  });
+};
+
+// Helper function to get best odds from odds data
+const getBestOdds = (oddsData: OddsData): { odds: string; bookmaker: string } => {
+  const bookmakers = [
+    { name: 'Bet365', odds: oddsData.bet365_opening },
+    { name: 'William Hill', odds: oddsData.william_hill_opening },
+    { name: 'Paddy Power', odds: oddsData.paddy_power_opening },
+    { name: 'Sky Bet', odds: oddsData.sky_bet_opening },
+    { name: 'Ladbrokes', odds: oddsData.ladbrokes_opening },
+    { name: 'Coral', odds: oddsData.coral_opening },
+    { name: 'Betfair', odds: oddsData.betfair_opening },
+    { name: 'Betfred', odds: oddsData.betfred_opening },
+    { name: 'Unibet', odds: oddsData.unibet_opening },
+    { name: 'Bet Victor', odds: oddsData.bet_victor_opening },
+    { name: 'Betfair Exchange', odds: oddsData.betfair_exchange_opening },
+  ];
+
+  const validOdds = bookmakers.filter(b => b.odds && b.odds !== 'null');
+  
+  if (validOdds.length === 0) {
+    return { odds: 'N/A', bookmaker: 'N/A' };
+  }
+
+  // Find best (highest) odds
+  const best = validOdds.reduce((prev, current) => {
+    const prevValue = parseFloat(prev.odds || '0');
+    const currentValue = parseFloat(current.odds || '0');
+    return currentValue > prevValue ? current : prev;
+  });
+
+  return { odds: best.odds || 'N/A', bookmaker: best.name };
+};
+
+export default function HandicapCardPage() {
+  const params = useParams();
+  const raceId = params?.raceId as string;
+  
+  const [race, setRace] = useState<Race | null>(null);
+  const [runners, setRunners] = useState<Runner[]>([]);
+  const [odds, setOdds] = useState<OddsData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!raceId) return;
+      
+      try {
+        setLoading(true);
+        const [raceData, runnersData, oddsData] = await Promise.all([
+          racecardsService.getRaceDetails(raceId),
+          racecardsService.getRaceRunners(raceId),
+          racecardsService.getRaceOdds(raceId)
+        ]);
+        
+        setRace(raceData);
+        setRunners(runnersData);
+        setOdds(oddsData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [raceId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-betting-dark text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-betting-green mx-auto mb-4"></div>
+          <p className="text-xl">Loading handicapping card...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-betting-dark text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-xl text-red-500 mb-4">Error: {error}</p>
+          <Link 
+            href="/horse-racing/racecards" 
+            className="bg-betting-green px-4 py-2 rounded text-white font-bold hover:bg-betting-secondary transition"
+          >
+            Back to Racecards
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!race) {
+    return (
+      <div className="min-h-screen bg-betting-dark text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-xl mb-4">Race not found</p>
+          <Link 
+            href="/horse-racing/racecards" 
+            className="bg-betting-green px-4 py-2 rounded text-white font-bold hover:bg-betting-secondary transition"
+          >
+            Back to Racecards
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-betting-dark text-white px-4 py-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <Link 
+            href="/horse-racing/racecards"
+            className="inline-flex items-center text-betting-green hover:text-betting-secondary mb-4"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Racecards
+          </Link>
+          
+          {/* Race Header */}
+          <div className="bg-gray-800 rounded-lg p-6 mb-6">
+            <div className="flex flex-wrap items-center justify-between mb-4">
+              <h1 className="text-3xl font-bold text-betting-green">{race.race_name || 'Unknown Race'}</h1>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center text-sm">
+                  <MapPin className="w-4 h-4 mr-1" />
+                  {race.course}
+                </div>
+                <div className="flex items-center text-sm">
+                  <Clock className="w-4 h-4 mr-1" />
+                  {race.off_time || (race.off_dt ? new Date(race.off_dt).toLocaleTimeString('en-GB', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  }) : 'TBC')}
+                </div>
+                {race.prize && (
+                  <div className="flex items-center text-sm">
+                    <DollarSign className="w-4 h-4 mr-1" />
+                    {race.prize.startsWith('£') ? race.prize : `£${race.prize}`}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Race Type Badges */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {race.type && (
+                <span className="bg-betting-green/20 text-betting-green px-3 py-1 rounded-full text-sm">
+                  {race.type}
+                </span>
+              )}
+              {race.race_class && (
+                <span className="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm">
+                  {race.race_class}
+                </span>
+              )}
+              {race.pattern && (
+                <span className="bg-yellow-600/20 text-yellow-400 px-3 py-1 rounded-full text-sm">
+                  {race.pattern}
+                </span>
+              )}
+            </div>
+            
+            {/* Race Details Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="text-center">
+                <div className="text-sm text-gray-400">Distance</div>
+                <div className="font-semibold">{race.distance || 'Unknown'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-400">Going</div>
+                <div className="font-semibold">{race.going || 'Unknown'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-400">Field Size</div>
+                <div className="font-semibold flex items-center justify-center">
+                  <Users className="w-4 h-4 mr-1" />
+                  {race.field_size || runners.length}
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-400">Surface</div>
+                <div className="font-semibold">{race.surface || 'Unknown'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-400">Weather</div>
+                <div className="font-semibold">{race.weather || 'Unknown'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-400">Age Band</div>
+                <div className="font-semibold">{race.age_band || 'All Ages'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Runners */}
+        <div className="space-y-6">
+          {runners.map((runner) => {
+            const runnerOdds = odds.find(o => o.runner_id === runner.id);
+            const bestOdds = runnerOdds ? getBestOdds(runnerOdds) : { odds: 'N/A', bookmaker: 'N/A' };
+            
+            return (
+              <div key={runner.id} className="bg-gray-800 rounded-lg p-6">
+                {/* Runner Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-4">
+                    <div className="bg-betting-green text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+                      {runner.number || '?'}
+                    </div>
+                    {runner.silk_url && (
+                      <img 
+                        src={runner.silk_url} 
+                        alt="Silk" 
+                        className="w-8 h-8 rounded-full" 
+                      />
+                    )}
+                    <div>
+                      <h3 className="text-xl font-bold text-betting-green">{runner.horse_name}</h3>
+                      <div className="text-sm text-gray-400">
+                        {runner.age}yo {runner.sex} {runner.colour}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-betting-green">
+                      {bestOdds.odds}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {bestOdds.bookmaker}
+                    </div>
+                    <div className="text-sm text-gray-400">
+                      Draw: {runner.draw || 'N/A'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Runner Details Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
+                  {/* Connections */}
+                  <div>
+                    <h4 className="font-semibold text-betting-green mb-2 flex items-center">
+                      <Users className="w-4 h-4 mr-2" />
+                      Connections
+                    </h4>
+                    <div className="space-y-1 text-sm">
+                      <div><span className="text-gray-400">Trainer:</span> {runner.trainer || 'Unknown'}</div>
+                      <div><span className="text-gray-400">Jockey:</span> {runner.jockey || 'Unknown'}</div>
+                      <div><span className="text-gray-400">Owner:</span> {runner.owner || 'Unknown'}</div>
+                      <div><span className="text-gray-400">Weight:</span> {formatWeight(runner.weight_lbs)}</div>
+                    </div>
+                  </div>
+
+                  {/* Breeding */}
+                  <div>
+                    <h4 className="font-semibold text-betting-green mb-2 flex items-center">
+                      <Star className="w-4 h-4 mr-2" />
+                      Breeding
+                    </h4>
+                    <div className="space-y-1 text-sm">
+                      <div><span className="text-gray-400">Sire:</span> {runner.sire || 'Unknown'}</div>
+                      <div><span className="text-gray-400">Dam:</span> {runner.dam || 'Unknown'}</div>
+                      <div><span className="text-gray-400">Dam's Sire:</span> {runner.damsire || 'Unknown'}</div>
+                      <div><span className="text-gray-400">Bred:</span> {runner.breeder || 'Unknown'}</div>
+                    </div>
+                  </div>
+
+                  {/* Ratings & Form */}
+                  <div>
+                    <h4 className="font-semibold text-betting-green mb-2 flex items-center">
+                      <Trophy className="w-4 h-4 mr-2" />
+                      Ratings & Form
+                    </h4>
+                    <div className="space-y-1 text-sm">
+                      <div><span className="text-gray-400">OFR:</span> {runner.ofr || 'N/A'}</div>
+                      <div><span className="text-gray-400">RPR:</span> {runner.rpr || 'N/A'}</div>
+                      <div><span className="text-gray-400">TS:</span> {runner.ts || 'N/A'}</div>
+                      <div><span className="text-gray-400">Last Run:</span> {runner.last_run || 'N/A'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form */}
+                {runner.form && (
+                  <div className="mb-4">
+                    <h4 className="font-semibold text-betting-green mb-2 flex items-center">
+                      <Eye className="w-4 h-4 mr-2" />
+                      Recent Form
+                    </h4>
+                    <div className="flex items-center">
+                      {parseForm(runner.form)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Equipment & Analysis */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                  {/* Equipment */}
+                  {(runner.headgear || runner.wind_surgery) && (
+                    <div>
+                      <h4 className="font-semibold text-betting-green mb-2 flex items-center">
+                        <Zap className="w-4 h-4 mr-2" />
+                        Equipment
+                      </h4>
+                      <div className="space-y-1 text-sm">
+                        {runner.headgear && (
+                          <div><span className="text-gray-400">Headgear:</span> {runner.headgear}</div>
+                        )}
+                        {runner.wind_surgery && (
+                          <div><span className="text-gray-400">Wind Surgery:</span> {runner.wind_surgery}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Trainer Stats */}
+                  {(runner.trainer_14_days_runs || runner.trainer_14_days_wins || runner.trainer_14_days_percent) && (
+                    <div>
+                      <h4 className="font-semibold text-betting-green mb-2">
+                        Trainer 14-Day Stats
+                      </h4>
+                      <div className="space-y-1 text-sm">
+                        <div><span className="text-gray-400">Runs:</span> {runner.trainer_14_days_runs || 0}</div>
+                        <div><span className="text-gray-400">Wins:</span> {runner.trainer_14_days_wins || 0}</div>
+                        <div><span className="text-gray-400">Strike Rate:</span> {runner.trainer_14_days_percent || '0%'}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Analysis & Comments */}
+                {(runner.spotlight || runner.comment) && (
+                  <div className="border-t border-gray-700 pt-4">
+                    <h4 className="font-semibold text-betting-green mb-2">Analysis</h4>
+                    {runner.spotlight && (
+                      <div className="mb-2">
+                        <span className="text-sm font-semibold text-yellow-400">Spotlight: </span>
+                        <span className="text-sm">{runner.spotlight}</span>
+                      </div>
+                    )}
+                    {runner.comment && (
+                      <div>
+                        <span className="text-sm font-semibold text-blue-400">Comments: </span>
+                        <span className="text-sm">{runner.comment}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 text-center">
+          <Link 
+            href="/horse-racing/racecards"
+            className="bg-betting-green px-6 py-3 rounded text-white font-bold hover:bg-betting-secondary transition"
+          >
+            Back to All Racecards
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+} 

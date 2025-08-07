@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Layout from "@/components/layout/Layout";
+import PageProtection from "@/components/auth/PageProtection";
+import { MembershipTier } from "@/lib/permissions/access-control";
 import { 
   ArrowLeft, 
   Clock, 
@@ -18,17 +20,16 @@ import {
   BarChart3,
   Eye,
   Crown,
-  Zap
+  Zap,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { 
-  getTodaysRaces,
-  getRaceRunners, 
-  getRaceOdds,
-  Race, 
-  Runner,
   getCurrentUKDateInfo 
 } from '@/lib/services/racecardsService';
 import { getRandomTrackImage } from "@/lib/services/trackImageService";
+import { ExpertAnalysis } from "@/components/racing/ExpertAnalysis";
+import { PacePredictor } from "@/components/racing/PacePredictor";
 
 interface RaceOdds {
   id: number;
@@ -105,8 +106,28 @@ interface RaceOdds {
   virgin_bet_history?: string;
   talksport_bet_history?: string;
   betfair_exchange_history?: string;
+  // Average and sharp odds fields
+  average_odds?: string;
+  sharp_average_odds?: string;
   [key: string]: any;
 }
+
+// Utility function to parse comma-separated jockey/trainer stats
+// Format: "runs,wins,win_percentage,profit_loss"
+// Example: "72,5,7.0,-46.38"
+const parseJockeyTrainerStats = (data: string | null | undefined) => {
+  if (!data || typeof data !== 'string') return null;
+  
+  const parts = data.split(',');
+  if (parts.length !== 4) return null;
+  
+  return {
+    runs: parts[0] || null,
+    wins: parts[1] || null,
+    win_percentage: parts[2] || null,
+    profit_loss: parts[3] || null
+  };
+};
 
 export default function HandicapRacecard() {
   const params = useParams();
@@ -120,10 +141,13 @@ export default function HandicapRacecard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [racingImageUrl, setRacingImageUrl] = useState<string>('');
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const [ppTabSelection, setPpTabSelection] = useState<Record<string, string>>({});
   
   // Chart state
   const [selectedHorseForChart, setSelectedHorseForChart] = useState<string>('');
   const [enabledBookmakers, setEnabledBookmakers] = useState<Set<string>>(new Set(['bet365', 'william_hill', 'paddy_power', 'sky_bet']));
+  const [enabledDataTypes, setEnabledDataTypes] = useState<Set<string>>(new Set(['average_odds']));
   const chartRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -132,32 +156,45 @@ export default function HandicapRacecard() {
         setLoading(true);
         setError(null);
         
-        // Fetch race data, runners, and odds in parallel
-        const [racesData, runnersData, oddsData, imageUrl] = await Promise.all([
-          getTodaysRaces(),
-          getRaceRunners(raceId),
-          getRaceOdds(raceId),
-          getRandomTrackImage(raceId) // Use raceId as seed for consistent daily image
-        ]);
+        // Use the new racing data service
+        console.log('HANDICAP CARDS: Calling racing data service...');
+        const response = await fetch(`/api/racing-data-service?service=handicap-cards&raceId=${raceId}`);
         
-        // Find the specific race
-        const raceData = racesData.find((r: any) => r.race_id === raceId);
-        if (!raceData) {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch data: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('HANDICAP CARDS: API response:', data);
+        
+        if (!data.race) {
           setError('Race not found');
           return;
         }
         
+        // Get track image
+        const imageUrl = await getRandomTrackImage(raceId);
+        
         // Debug logging
         console.log('Race ID:', raceId);
-        console.log('Runners Data:', runnersData);
-        console.log('Odds Data:', oddsData);
-        console.log('First runner horse_id:', runnersData[0]?.horse_id);
-        console.log('First odds record:', oddsData[0]);
+        console.log('Runners Data:', data.runners);
+        console.log('Odds Data:', data.odds);
+        console.log('First runner horse_id:', data.runners[0]?.horse_id);
+        console.log('First odds record:', data.odds[0]);
         
-        setRace(raceData);
-        setAllRaces(racesData);
-        setRunners(runnersData);
-        setOdds(oddsData as RaceOdds[]);
+        // Check for timeform data
+        const hasTimeformData = data.runners.some((runner: any) => runner.timeform);
+        console.log('Has timeform data:', hasTimeformData);
+        if (hasTimeformData) {
+          console.log('Sample timeform data:', data.runners[0]?.timeform);
+        } else {
+          console.warn('No timeform data found for any runners');
+        }
+        
+        setRace(data.race);
+        setAllRaces([data.race]); // Only this race
+        setRunners(data.runners);
+        setOdds(data.odds as RaceOdds[]);
         setRacingImageUrl(imageUrl);
       } catch (err) {
         console.error('Error fetching race data:', err);
@@ -194,10 +231,11 @@ export default function HandicapRacecard() {
 
   const getFormColor = (position: string): string => {
     if (!position || position === '-') return 'text-gray-400';
-    if (position === '1') return 'text-green-400 font-bold';
-    if (position === '2') return 'text-blue-400 font-semibold';
-    if (position === '3') return 'text-orange-400 font-semibold';
-    if (['4', '5', '6'].includes(position)) return 'text-yellow-400';
+    if (position === '1') return 'text-green-400 font-bold'; // Bright green for 1
+    if (['2', '3'].includes(position)) return 'text-green-700 font-semibold'; // Dark green for 2-3
+    if (['4', '5'].includes(position)) return 'text-yellow-400'; // Yellow for 4-5
+    if (['6', '7'].includes(position)) return 'text-orange-400'; // Orange for 6-7
+    if (/^\d+$/.test(position) && parseInt(position) >= 8) return 'text-gray-400'; // Grey for 8+
     if (position === 'F') return 'text-red-400';
     if (position === 'U') return 'text-red-300';
     if (position === 'P') return 'text-red-200';
@@ -306,6 +344,41 @@ export default function HandicapRacecard() {
       'tote': 'Tote'
     };
     return bookmakerMap[bookmaker] || bookmaker.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
+  // Parse support/resistance levels from the database text format
+  const parseLatestLevel = (levelData: string | null): string => {
+    if (!levelData || levelData.trim() === '') return '-';
+    
+    // Format: "4.3_12:23 / 3.55_12:23 / 3.35_12:23 / 3_12:23 / 4.3_12:26 / 4.3_12:27"
+    // Split by " / " to get individual entries
+    const entries = levelData.split(' / ').map(entry => entry.trim()).filter(entry => entry);
+    if (entries.length === 0) return '-';
+    
+    // Get the last entry (most recent timestamp)
+    const latestEntry = entries[entries.length - 1];
+    const parts = latestEntry.split('_');
+    
+    if (parts.length >= 2) {
+      const level = parseFloat(parts[0]);
+      return isNaN(level) ? '-' : level.toFixed(2);
+    }
+    
+    return '-';
+  };
+
+  // Parse percentage values and add % symbol
+  const parseLatestPercentage = (levelData: string | null): string => {
+    const value = parseLatestLevel(levelData);
+    return value === '-' ? '-' : `${value}%`;
+  };
+
+  // Parse latest price change value from price_change column
+  const parseLatestPriceChange = (priceChangeData: string | null): string => {
+    if (!priceChangeData) return 'N/A';
+    const lastEntry = priceChangeData.split(' / ').pop() || '';
+    const priceChange = lastEntry.split('_')[0];
+    return priceChange ? `${priceChange}%` : 'N/A';
   };
 
   // Parse odds history string and get the latest odds
@@ -420,6 +493,28 @@ export default function HandicapRacecard() {
   };
 
   // Get highest and lowest odds from all history for the day
+  const getLiveAverageOdds = (runner: any): string => {
+    if (!runner?.average_odds) return 'N/A';
+    
+    const historyData = getAllOddsFromHistory(runner.average_odds);
+    if (historyData.length === 0) return 'N/A';
+    
+    // Get the most recent entry (latest timestamp)
+    const latestEntry = historyData[historyData.length - 1];
+    return latestEntry.odds.toFixed(2);
+  };
+
+  const getLiveSharpAverageOdds = (runner: any): string => {
+    if (!runner?.sharp_average_odds) return 'N/A';
+    
+    const historyData = getAllOddsFromHistory(runner.sharp_average_odds);
+    if (historyData.length === 0) return 'N/A';
+    
+    // Get the most recent entry (latest timestamp)
+    const latestEntry = historyData[historyData.length - 1];
+    return latestEntry.odds.toFixed(2);
+  };
+
   const getHighLowOdds = (runnerOdds: RaceOdds | null): { 
     high: { value: string; bookmaker: string; time: string }; 
     low: { value: string; bookmaker: string; time: string } 
@@ -545,42 +640,34 @@ export default function HandicapRacecard() {
       'h': 'Hood',
       'p': 'Cheek Pieces',
       't': 'Tongue Strap',
-      'x': 'Previously worn some headgear but none today'
+      'x': 'No Headgear Today'
     };
     
-    const fullName = headgearMap[headgearCode.toLowerCase()] || headgearCode.toUpperCase();
-    
-    // If multiple pieces and the name has multiple words, abbreviate the second word
-    if (isMultiple && fullName.includes(' ')) {
-      const words = fullName.split(' ');
-      if (words.length >= 2) {
-        return `${words[0]} ${words[1].charAt(0)}`;
-      }
-    }
-    
-    return fullName;
+    return headgearMap[headgearCode.toLowerCase()] || headgearCode;
   };
 
-  // Parse multiple headgear pieces (e.g., "tp" becomes ["t", "p"], "t,p" or "t p")
   const parseHeadgearPieces = (headgearCode: string | null): string[] => {
     if (!headgearCode) return [];
     
-    let pieces: string[] = [];
+    // Convert to lowercase for consistent matching
+    const code = headgearCode.toLowerCase();
     
-    // First expand any combined codes like "tp" to separate pieces
-    const expandedCode = headgearCode
-      .toLowerCase()
-      .replace('tp', 't,p')  // Convert "tp" to "t,p"
-      .replace('ht', 'h,t')  // Handle other common combinations if needed
-      .replace('hp', 'h,p')
-      .replace('bt', 'b,t')
-      .replace('bp', 'b,p');
+    // Individual headgear pieces
+    const pieces: string[] = [];
     
-    // Then split by comma or space and clean up
-    pieces = expandedCode
-      .split(/[,\s]+/)
-      .map(piece => piece.trim().toLowerCase())
-      .filter(piece => piece.length > 0);
+    // Check for each possible headgear type
+    if (code.includes('b')) pieces.push('b');
+    if (code.includes('v')) pieces.push('v');
+    if (code.includes('e')) pieces.push('e');
+    if (code.includes('h')) pieces.push('h');
+    if (code.includes('p')) pieces.push('p');
+    if (code.includes('t')) pieces.push('t');
+    if (code.includes('x')) pieces.push('x');
+    
+    // If no matches found but code exists, return the original code
+    if (pieces.length === 0 && code) {
+      return [headgearCode];
+    }
     
     return pieces;
   };
@@ -592,21 +679,68 @@ export default function HandicapRacecard() {
 
   const formatSex = (sexCode: string | null): string => {
     if (!sexCode) return '';
-    
     const sexMap: { [key: string]: string } = {
-      'C': 'Colt',
-      'F': 'Filly', 
-      'G': 'Gelding',
-      'H': 'Horse',
-      'M': 'Mare'
+      'C': 'colt',
+      'F': 'filly',
+      'G': 'gelding',
+      'H': 'horse',
+      'M': 'mare'
     };
-    
-    const result = sexMap[sexCode.toUpperCase()] || sexCode;
-    // Ensure first letter is capitalized
-    return result.charAt(0).toUpperCase() + result.slice(1).toLowerCase();
+    return sexMap[sexCode] || sexCode;
   };
 
-  // Get bookmakers that have live odds data (not all SP/null) for any runner
+  // Function to extract just the numeric part of Timeform Rating
+  const extractTimeformRating = (rating: string | null | undefined): string => {
+    if (!rating) return '-';
+    
+    console.log('Extracting from rating:', rating);
+    
+    // Extract just the numeric part using regex
+    const match = rating.match(/\d+/);
+    return match ? match[0] : '-';
+  };
+  
+  // Function to get Timeform Rating note based on symbols
+  const getTimeformRatingNote = (rating: string | null | undefined): string | null => {
+    if (!rating) return null;
+    
+    let note = null;
+    
+    if (rating.includes('p')) {
+      note = "Likely to improve according to handicapper analysis.";
+    } else if (rating.includes('P')) {
+      note = "Capable of much better performance than current rating suggests.";
+    } else if (rating.includes('+')) {
+      note = "May perform better than current rating indicates.";
+    } else if (rating.includes('?')) {
+      note = "Rating is suspect or horse is currently out of form.";
+    } else if (rating.includes('§§')) {
+      note = "Horse considered too unsatisfactory for a reliable rating.";
+    } else if (rating.includes('§')) {
+      note = "Unreliable performer due to temperament issues.";
+    } else if (rating.includes('xx')) {
+      note = "Jumping ability too poor to warrant a reliable rating.";
+    } else if (rating.includes('x')) {
+      note = "Poor jumper - caution advised.";
+    }
+    
+    return note;
+  };
+
+  const toggleCardExpansion = (horseId: string) => {
+    setExpandedCards(prev => ({
+      ...prev,
+      [horseId]: !prev[horseId]
+    }));
+  };
+  
+  const selectPpTab = (horseId: string, tab: string) => {
+    setPpTabSelection((prev: Record<string, string>) => ({
+      ...prev,
+      [horseId]: tab
+    }));
+  };
+  
   const getValidBookmakers = (): Array<{ key: string; name: string; historyField: string }> => {
     // Complete list of ALL bookmakers from the RaceOdds interface
     const allBookmakers = [
@@ -846,6 +980,58 @@ export default function HandicapRacecard() {
     return colors[bookmakerKey] || '#6b7280';
   };
 
+  // Get data type colors
+  const getDataTypeColor = (dataType: string): string => {
+    const colors: { [key: string]: string } = {
+      'average_odds': '#10B981',     // Green
+      'sharp_average_odds': '#F59E0B', // Amber
+      '5_moving_average': '#3B82F6',   // Blue
+      '20_moving_average': '#8B5CF6',  // Purple  
+      '60_moving_average': '#EF4444',  // Red
+      '5_bollinger_bands': '#06B6D4',  // Cyan
+      '20_bollinger_bands': '#84CC16', // Lime
+      '60_bollinger_bands': '#F97316'  // Orange
+    };
+    return colors[dataType] || '#9CA3AF';
+  };
+
+  // Parse data from runner columns (format: "value_timestamp / value_timestamp")
+  const getRunnerChartData = (runner: any, dataType: string) => {
+    if (!runner || !runner[dataType]) return [];
+    
+    const historyData = getAllOddsFromHistory(runner[dataType]);
+    return historyData.map(entry => ({
+      odds: entry.odds,
+      time: parseTimeToMinutes(entry.time)
+    }));
+  };
+
+  // Parse Bollinger Bands data (format: "upper_lower_timestamp / upper_lower_timestamp")
+  const getBollingerBandsChartData = (runner: any, dataType: string) => {
+    if (!runner || !runner[dataType]) return [];
+    
+    const entries = runner[dataType].split(' / ').map((entry: string) => entry.trim()).filter((entry: string) => entry);
+    const result = [];
+    
+    for (const entry of entries) {
+      const parts = entry.split('_');
+      if (parts.length === 3) {
+        const upper = parseFloat(parts[0]);
+        const lower = parseFloat(parts[1]);
+        const time = parts[2];
+        if (!isNaN(upper) && !isNaN(lower) && time) {
+          result.push({
+            upper,
+            lower,
+            time: parseTimeToMinutes(time)
+          });
+        }
+      }
+    }
+    
+    return result.sort((a, b) => a.time - b.time);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-betting-dark text-white p-6">
@@ -881,10 +1067,94 @@ export default function HandicapRacecard() {
     return acc;
   }, []);
 
+  // Function to check if this is first or second race after trainer/owner switch
+  const checkSwitchStatus = (prevEntities: any[] | null, pastPerformances: any[]): { isSwitch: boolean, switchNumber: number, previousEntity: string | null, switchDate: string | null } => {
+    if (!prevEntities || !Array.isArray(prevEntities) || prevEntities.length === 0) {
+      return { isSwitch: false, switchNumber: 0, previousEntity: null, switchDate: null };
+    }
+    
+    // Sort by most recent switch date
+    const sortedEntities = [...prevEntities].sort((a, b) => {
+      return new Date(b.change_date).getTime() - new Date(a.change_date).getTime();
+    });
+    
+    const mostRecentSwitch = sortedEntities[0];
+    const switchDate = new Date(mostRecentSwitch.change_date);
+    
+    // Count races since the switch
+    let racesSinceSwitch = 0;
+    if (Array.isArray(pastPerformances)) {
+      for (const pp of pastPerformances) {
+        const ppDate = pp.date ? new Date(pp.date) : null;
+        if (ppDate && ppDate > switchDate) {
+          racesSinceSwitch++;
+        }
+      }
+    }
+    
+    // Only show for first or second race after switch
+    const isSwitch = racesSinceSwitch < 2;
+    const switchNumber = racesSinceSwitch === 0 ? 1 : 2;
+    
+    return { 
+      isSwitch, 
+      switchNumber, 
+      previousEntity: mostRecentSwitch.trainer || mostRecentSwitch.owner || null,
+      switchDate: mostRecentSwitch.change_date
+    };
+  };
+
+  // Format date for tooltip
+  const formatSwitchDate = (dateStr: string | null): string => {
+    if (!dateStr) return '';
+    
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  };
+
+  // Function to normalize track names for display
+  const normalizeTrackName = (trackName: string | null | undefined): string => {
+    if (!trackName) return '-';
+    
+    // Map Timeform track names to standard display names
+    const trackNameMap: { [key: string]: string } = {
+      'Catterick Bridge': 'Catterick',
+      'Chelmsford City': 'Chelmsford',
+      'Epsom Downs': 'Epsom',
+      'Fontwell Park': 'Fontwell',
+      'Great Yarmouth': 'Yarmouth',
+      'Hamilton Park': 'Hamilton',
+      'Haydock Park': 'Haydock',
+      'Kempton Park': 'Kempton',
+      'Lingfield Park': 'Lingfield',
+      'Market Rasen': 'Rasen',
+      'Sandown Park': 'Sandown',
+      'Stratford-on-Avon': 'Stratford',
+      'Wolverhampton': 'Wolves'
+    };
+    
+    return trackNameMap[trackName] || trackName;
+  };
+
   return (
     <Layout>
-      <div className="min-h-screen bg-betting-dark text-white">
-        <div className="container mx-auto px-4 py-8">
+      <PageProtection
+        requiredAuth={true}
+        minimumTier={MembershipTier.Premium}
+        redirectTo="/membership"
+        notificationMessage="You need a paid membership to access Handicap Cards"
+      >
+      <div className="min-h-screen text-white relative">
+        {/* Background wallpaper */}
+        <div className="bg-wallpaper"></div>
+        {/* Semi-transparent overlay for better readability */}
+        <div className="bg-overlay"></div>
+        
+        <div className="container mx-auto px-4 py-8 relative z-10">
           {/* Header Navigation */}
           <div className="flex items-center justify-between mb-6">
             <Link 
@@ -931,10 +1201,10 @@ export default function HandicapRacecard() {
           })()}
 
           {/* Race Header */}
-          <div className="bg-betting-green/10 border border-betting-green/30 rounded-xl overflow-hidden mb-8">
+          <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/80 backdrop-blur-md rounded-xl overflow-hidden mb-8 shadow-xl">
             <div className="flex flex-col lg:flex-row">
               {/* Cover Photo */}
-              <div className="lg:w-64 h-40 lg:h-64">
+              <div className="lg:w-64 h-40 lg:h-auto relative">
                 <img 
                   src={racingImageUrl}
                   alt="Racing"
@@ -943,6 +1213,7 @@ export default function HandicapRacecard() {
                     e.currentTarget.src = '/images/fallback-track.jpg';
                   }}
                 />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/50 to-transparent"></div>
               </div>
 
               {/* Race Content */}
@@ -950,88 +1221,91 @@ export default function HandicapRacecard() {
                 <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
                   {/* Race Title & Info */}
                   <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="bg-betting-green/20 text-betting-green px-4 py-2 rounded-lg font-mono font-bold text-lg">
+                    <div className="flex flex-wrap items-center gap-3 mb-4">
+                      <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-4 py-2 rounded-lg font-mono font-bold text-lg text-white shadow-lg">
                         {formatRaceTime(race)}
                       </div>
-                      <div className={`px-3 py-1 rounded border text-sm font-semibold ${getRaceTypeColor(getRaceType(race))}`}>
+                      <div className="px-3 py-1 rounded-lg bg-gray-800/80 text-white text-sm font-semibold shadow-md">
                         {getRaceType(race)}
                       </div>
                       {(race.race_class || race.pattern) && (
-                        <div className="px-3 py-1 rounded border text-sm font-semibold bg-orange-500/20 text-orange-400 border-orange-500/30">
+                        <div className="px-3 py-1 rounded-lg bg-gray-800/80 text-white text-sm font-semibold shadow-md">
                           {formatRaceClassAndPattern(race.race_class, race.pattern)}
                         </div>
                       )}
                       {race.big_race && (
-                        <div className="px-3 py-1 rounded border text-sm font-semibold bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                        <div className="px-3 py-1 rounded-lg bg-yellow-600 text-white text-sm font-semibold shadow-md">
                           BIG RACE
                         </div>
                       )}
                     </div>
                     
-                    <h1 className="text-4xl font-heading font-extrabold text-white mb-2">
+                    <h1 className="text-4xl font-heading font-extrabold text-white mb-3 tracking-tight">
                       {race.race_name || 'Race Details'}
                     </h1>
-                    <div className="text-lg text-gray-300 mb-2">
+                    <div className="text-lg text-gray-200 mb-4 flex items-center">
                       <span className="font-semibold">{race.course || 'Unknown Course'}</span>
                       {race.distance && (
                         <>
-                          <span className="mx-2">•</span>
+                          <span className="mx-2 text-gray-400">•</span>
                           <span>{race.distance}</span>
                         </>
                       )}
                     </div>
                     
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-300">
-                      <div>
-                        <span className="text-gray-400">Course:</span>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                      <div className="bg-gray-800/50 p-3 rounded-lg">
+                        <span className="text-gray-400 block mb-1">Course</span>
                         <div className="text-white font-semibold">{race.course}</div>
                       </div>
-                      <div>
-                        <span className="text-gray-400">Distance:</span>
+                      <div className="bg-gray-800/50 p-3 rounded-lg">
+                        <span className="text-gray-400 block mb-1">Distance</span>
                         <div className="text-white font-semibold">{race.distance_round || race.distance}</div>
                       </div>
-                      <div>
-                        <span className="text-gray-400">Prize:</span>
-                        <div className="text-betting-green font-semibold">{formatPrizeMoney(race.prize)}</div>
+                      <div className="bg-gray-800/50 p-3 rounded-lg">
+                        <span className="text-gray-400 block mb-1">Prize</span>
+                        <div className="text-blue-400 font-semibold">{formatPrizeMoney(race.prize)}</div>
                       </div>
-                      <div>
-                        <span className="text-gray-400">Field Size:</span>
+                      <div className="bg-gray-800/50 p-3 rounded-lg">
+                        <span className="text-gray-400 block mb-1">Field Size</span>
                         <div className="text-white font-semibold">{uniqueRunners.length} runners</div>
                       </div>
                     </div>
                   </div>
 
                   {/* Race Conditions */}
-                  <div className="lg:w-64 bg-betting-green/5 border border-betting-green/20 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-white mb-3">Race Conditions</h3>
-                    <div className="space-y-2 text-sm">
-                      <div>
+                  <div className="lg:w-72 bg-gray-800/60 rounded-lg p-5 shadow-lg">
+                    <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                      <span className="w-2 h-6 bg-blue-500 rounded-sm mr-2"></span>
+                      Race Conditions
+                    </h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between">
                         <span className="text-gray-400">Going:</span>
-                        <span className="ml-2 text-white">{race.going || 'Unknown'}</span>
+                        <span className="text-white font-medium">{race.going || 'Unknown'}</span>
                       </div>
                       {race.weather && race.weather.toLowerCase() !== 'unknown' && (
-                        <div>
+                        <div className="flex justify-between">
                           <span className="text-gray-400">Weather:</span>
-                          <span className="ml-2 text-white">{race.weather}</span>
+                          <span className="text-white font-medium">{race.weather}</span>
                         </div>
                       )}
-                      <div>
+                      <div className="flex justify-between">
                         <span className="text-gray-400">Surface:</span>
-                        <span className="ml-2 text-white">{race.surface || 'Turf'}</span>
+                        <span className="text-white font-medium">{race.surface || 'Turf'}</span>
                       </div>
-                      <div>
+                      <div className="flex justify-between">
                         <span className="text-gray-400">Age Restriction:</span>
-                        <span className="ml-2 text-white">{race.age_band || 'All Ages'}</span>
+                        <span className="text-white font-medium">{race.age_band || 'All Ages'}</span>
                       </div>
-                      <div>
+                      <div className="flex justify-between">
                         <span className="text-gray-400">Race Type:</span>
-                        <span className="ml-2 text-white">{race.race_type || 'Handicap'}</span>
+                        <span className="text-white font-medium">{race.race_type || 'Handicap'}</span>
                       </div>
                       {race.conditions_text && (
-                        <div className="pt-2 border-t border-betting-green/20">
-                          <span className="text-gray-400">Conditions:</span>
-                          <div className="text-xs text-gray-300 mt-1 leading-relaxed">
+                        <div className="pt-3 border-t border-gray-700">
+                          <span className="text-gray-400 block mb-1">Conditions:</span>
+                          <div className="text-xs text-gray-300 leading-relaxed">
                             {race.conditions_text}
                           </div>
                         </div>
@@ -1043,41 +1317,34 @@ export default function HandicapRacecard() {
             </div>
           </div>
 
-          {/* Race Analysis Summary */}
-          {race.tip || race.verdict || race.betting_forecast ? (
-            <div className="bg-betting-green/5 border border-betting-green/20 rounded-xl p-4 mb-6">
-              <h2 className="text-lg font-heading font-bold text-white mb-3">
-                Expert Analysis
-              </h2>
-              <div className="grid md:grid-cols-3 gap-3">
-                {race.tip && (
-                  <div className="bg-gray-800/40 border border-gray-600/30 rounded-lg p-3">
-                    <h3 className="text-white font-semibold mb-1 text-sm">Tip</h3>
-                    <p className="text-gray-300 text-xs leading-relaxed">{race.tip}</p>
+          {/* Combined Expert Analysis & Pace Predictor */}
+          <div className="mb-8">
+            <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/80 rounded-xl backdrop-blur-sm shadow-xl p-6">
+              <div className="flex items-center space-x-3 mb-6">
+                <span className="w-2 h-6 bg-blue-500 rounded-sm"></span>
+                <h2 className="text-xl font-heading font-bold text-white">Pace Analysis</h2>
                   </div>
-                )}
-                {race.verdict && (
-                  <div className="bg-gray-800/40 border border-gray-600/30 rounded-lg p-3">
-                    <h3 className="text-white font-semibold mb-1 text-sm">Verdict</h3>
-                    <p className="text-gray-300 text-xs leading-relaxed">{race.verdict}</p>
+              
+              {/* Expert Analysis Section */}
+              <ExpertAnalysis 
+                race={race} 
+                runners={uniqueRunners} 
+              />
+              
+              {/* Pace Predictor Section */}
+              <PacePredictor race={race} runners={uniqueRunners} />
                   </div>
-                )}
-                {race.betting_forecast && (
-                  <div className="bg-gray-800/40 border border-gray-600/30 rounded-lg p-3">
-                    <h3 className="text-white font-semibold mb-1 text-sm">Betting Forecast</h3>
-                    <p className="text-gray-300 text-xs leading-relaxed">{race.betting_forecast}</p>
                   </div>
-                )}
-              </div>
-            </div>
-          ) : null}
 
           {/* Runners Table */}
-          <div className="bg-betting-dark border border-betting-green/20 rounded-xl overflow-hidden">
-            <div className="p-6 border-b border-betting-green/20">
+          <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/80 rounded-xl overflow-hidden shadow-xl">
+            <div className="p-6 border-b border-gray-700/50">
+              <div className="flex items-center space-x-3">
+                <span className="w-2 h-6 bg-blue-500 rounded-sm"></span>
               <h2 className="text-xl font-heading font-bold text-white">
                 Runners & PPs
               </h2>
+              </div>
             </div>
 
             {/* Runners - DRF Style Cards */}
@@ -1142,14 +1409,14 @@ export default function HandicapRacecard() {
                               <img 
                                 src={runner.silk_url} 
                                 alt={`${runner.owner || 'Owner'} silks`}
-                                className="w-10 h-8 object-contain rounded border border-gray-600/30"
+                                className="w-14 h-12 object-contain shadow-md"
                                 onError={(e) => {
                                   const target = e.target as HTMLImageElement;
                                   target.style.display = 'none';
                                 }}
                               />
                             ) : (
-                              <div className="w-8 h-8 bg-gray-500/20 rounded border border-gray-600/30 flex items-center justify-center">
+                              <div className="w-14 h-12 bg-gray-500/20 shadow-md flex items-center justify-center">
                                 <span className="text-xs text-gray-500">?</span>
                               </div>
                             )}
@@ -1157,229 +1424,568 @@ export default function HandicapRacecard() {
                           
                           {/* Horse Number and Name */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1 mb-0.5">
-                              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shadow-md ${
                                 isNonRunner 
-                                  ? 'bg-gray-500/20 text-gray-500' 
-                                  : 'bg-betting-green/20 text-betting-green'
+                                  ? 'bg-gray-500/70 text-white' 
+                                  : 'bg-blue-600 text-white'
                               }`}>
                             {runner.number || index + 1}
                           </div>
-                              <h3 className={`font-bold text-sm truncate ${
+                              <h3 className={`font-bold text-lg tracking-tight truncate font-horse ${
                                 isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.horse_name}</h3>
-                            </div>
-                            <div className={`text-xs flex items-center gap-0.5 flex-wrap ${
-                              isNonRunner ? 'text-gray-600' : 'text-gray-400'
-                            }`}>
-                              {/* Age */}
-                              <div className="bg-gray-500/10 px-1 py-0.5 rounded border border-gray-600/20 text-xs">
-                                {runner.age ? `${runner.age}yo` : '-'}
-                              </div>
-                              
-                              {/* Sex */}
-                              <div className="bg-gray-500/10 px-1 py-0.5 rounded border border-gray-600/20 text-xs">
-                                {formatSex(runner.sex) || '-'}
-                              </div>
-                              
-                              {/* Headgear */}
-                              {runner.headgear ? (() => {
-                                const pieces = parseHeadgearPieces(runner.headgear);
-                                const isMultiple = pieces.length > 1;
-                                return pieces.map((piece, index) => (
-                                  <div key={index} className="bg-gray-500/10 px-1 py-0.5 rounded border border-gray-600/20 text-xs">
-                                    {formatHeadgear(piece, isMultiple)}
-                                    {runner.headgear_run && (
-                                      <sup className="text-gray-400 text-xs ml-0.5">
-                                        ({runner.headgear_run})
-                                      </sup>
-                                    )}
-                                  </div>
-                                ));
-                              })() : (
-                                <div className="bg-gray-500/10 px-1 py-0.5 rounded border border-gray-600/20 text-xs">
-                                  -
-                                </div>
-                              )}
-                              
-                              {/* Wind Surgery */}
-                              {runner.wind_surgery && (
-                                <div className="bg-gray-500/10 px-1 py-0.5 rounded border border-gray-600/20 text-xs">
-                                  {formatWindSurgery(runner.wind_surgery)}
-                                  {runner.wind_surgery_run && (
-                                    <sup className="text-gray-400 text-xs ml-0.5">
-                                      ({runner.wind_surgery_run})
-                                    </sup>
-                                  )}
-                                </div>
-                              )}
+                              }`}>
+                                {runner.horse_name}
+                                {runner.draw && (
+                                  <span className="ml-1 text-white">
+                                    (<span className="text-betting-green">{runner.draw}</span>)
+                                  </span>
+                                )}
+                              </h3>
                             </div>
                           </div>
                         </div>
                         
-                        {/* Key Stats Row */}
-                        <div className="grid grid-cols-3 gap-0.5 text-xs">
-                          <div className={`px-1 py-0.5 rounded ${
-                            isNonRunner ? 'bg-gray-500/10' : 'bg-betting-green/10'
-                          }`}>
-                            <div className={`text-xs ${isNonRunner ? 'text-gray-600' : 'text-gray-400'}`}>WT</div>
-                            <div className={`font-semibold text-xs ${
-                              isNonRunner ? 'text-gray-500' : 'text-white'
-                            }`}>{runner.weight_lbs || '-'}</div>
+                        {/* Horse data pills - moved to left section */}
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {/* Weight */}
+                          <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                            WT: {runner.weight_lbs || '-'}
                           </div>
-                          <div className={`px-1 py-0.5 rounded ${
-                            isNonRunner ? 'bg-gray-500/10' : 'bg-betting-green/10'
-                          }`}>
-                            <div className={`text-xs ${isNonRunner ? 'text-gray-600' : 'text-gray-400'}`}>DR</div>
-                            <div className={`font-semibold text-xs ${
-                              isNonRunner ? 'text-gray-500' : 'text-white'
-                            }`}>{runner.draw || '-'}</div>
+                          
+                              {/* Age */}
+                          <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                                {runner.age ? `${runner.age}yo` : '-'}
+                              </div>
+                              
+                          {/* Sex - capitalized */}
+                          <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                            {formatSex(runner.sex)?.charAt(0).toUpperCase() + formatSex(runner.sex)?.slice(1) || '-'}
+                              </div>
+                              
+                          {/* Remove OR pill since it's duplicated in the data points grid */}
+                          
+                          {/* Trainer Switch Indicator */}
+                          {(() => {
+                            // Get past performances from timeform data
+                            let pastPerformances: any[] = [];
+                            if (runner.timeform) {
+                              if (Array.isArray(runner.timeform)) {
+                                pastPerformances = runner.timeform;
+                              } else if (runner.timeform.pp_1_date) {
+                                // Collect past performances from object structure
+                                pastPerformances = [1, 2, 3, 4, 5, 6]
+                                  .map(i => ({
+                                    date: runner.timeform[`pp_${i}_date`],
+                                    track: runner.timeform[`pp_${i}_track`]
+                                  }))
+                                  .filter(pp => pp.date);
+                              }
+                            }
+                            
+                            const trainerSwitch = checkSwitchStatus(runner.prev_trainers as any[], pastPerformances);
+                            
+                            if (trainerSwitch.isSwitch) {
+                              return (
+                                <div className="relative group">
+                                  <div className="px-2 py-1 bg-purple-700/50 rounded-md text-xs text-white">
+                                    {trainerSwitch.switchNumber === 1 ? '1st' : '2nd'} Trainer Switch
+                                  </div>
+                                  <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-gray-900 text-white text-xs p-2 rounded shadow-lg z-10 whitespace-nowrap">
+                                    <p>Previous Trainer: {trainerSwitch.previousEntity}</p>
+                                    <p>Changed: {formatSwitchDate(trainerSwitch.switchDate)}</p>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                          
+                          {/* Owner Switch Indicator */}
+                          {(() => {
+                            // Get past performances from timeform data
+                            let pastPerformances: any[] = [];
+                            if (runner.timeform) {
+                              if (Array.isArray(runner.timeform)) {
+                                pastPerformances = runner.timeform;
+                              } else if (runner.timeform.pp_1_date) {
+                                // Collect past performances from object structure
+                                pastPerformances = [1, 2, 3, 4, 5, 6]
+                                  .map(i => ({
+                                    date: runner.timeform[`pp_${i}_date`],
+                                    track: runner.timeform[`pp_${i}_track`]
+                                  }))
+                                  .filter(pp => pp.date);
+                              }
+                            }
+                            
+                            const ownerSwitch = checkSwitchStatus(runner.prev_owners as any[], pastPerformances);
+                            
+                            if (ownerSwitch.isSwitch) {
+                              return (
+                                <div className="relative group">
+                                  <div className="px-2 py-1 bg-indigo-700/50 rounded-md text-xs text-white">
+                                    {ownerSwitch.switchNumber === 1 ? '1st' : '2nd'} Owner Switch
+                                  </div>
+                                  <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-gray-900 text-white text-xs p-2 rounded shadow-lg z-10 whitespace-nowrap">
+                                    <p>Previous Owner: {ownerSwitch.previousEntity}</p>
+                                    <p>Changed: {formatSwitchDate(ownerSwitch.switchDate)}</p>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                          
+                                                    {/* Headgear if present */}
+                              {runner.headgear ? (() => {
+                                const pieces = parseHeadgearPieces(runner.headgear);
+                                return pieces.map((piece, index) => (
+                              <div key={index} className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                                {formatHeadgear(piece, false)}
+                                    {runner.headgear_run && (
+                                  <sup className="text-amber-400 text-[10px] ml-0.5 font-semibold">
+                                    {runner.headgear_run}
+                                      </sup>
+                                    )}
+                                  </div>
+                                ));
+                          })() : null}
+                              
+                              {/* Wind Surgery */}
+                              {runner.wind_surgery && (
+                            <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                                  {formatWindSurgery(runner.wind_surgery)}
+                                  {runner.wind_surgery_run && (
+                                <sup className="text-amber-400 text-[10px] ml-0.5 font-semibold">
+                                  {runner.wind_surgery_run}
+                                    </sup>
+                                  )}
+                                </div>
+                              )}
+                          
+                          {/* Flags */}
+                          {runner.past_results_flags && Array.isArray(runner.past_results_flags) && 
+                            runner.past_results_flags.map((flag: string, index: number) => {
+                              let flagText = '';
+                              if (flag === 'C') flagText = 'Course Winner';
+                              else if (flag === 'D') flagText = 'Distance Winner';
+                              else if (flag === 'CD') flagText = 'C&D Winner';
+                              else if (flag === 'BF') flagText = 'Beaten Favourite LTO';
+                              else if (flag === 'F') flagText = 'Fell';
+                              else if (flag === 'R') flagText = 'Refused';
+                              else if (flag === 'BD') flagText = 'Brought Down';
+                              else if (flag === 'U' || flag === 'UR') flagText = 'Unseated Rider';
+                              else flagText = flag;
+                              
+                              return (
+                                <div key={index} className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                                  {flagText}
+                            </div>
+                              );
+                            })
+                          }
+                          
+                          {/* Sire - shortened */}
+                          {runner.sire && (
+                            <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                              S: {runner.sire}
                           </div>
-                          <div className={`px-1 py-0.5 rounded ${
-                            isNonRunner ? 'bg-gray-500/10' : 'bg-betting-green/10'
-                          }`}>
-                            <div className={`text-xs ${isNonRunner ? 'text-gray-600' : 'text-gray-400'}`}>OR</div>
-                            <div className={`font-semibold text-xs ${
-                              isNonRunner ? 'text-gray-500' : 'text-white'
-                            }`}>{runner.ofr || '-'}</div>
+                          )}
+                          
+                          {/* Dam - shortened */}
+                          {runner.dam && (
+                            <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                              D: {runner.dam}
+                        </div>
+                          )}
+                          
+                          {/* Owner - shortened */}
+                          {runner.owner && (
+                            <div className="px-2 py-1 bg-gray-700/50 rounded-md text-xs text-white">
+                              O: {runner.owner}
                           </div>
+                          )}
                         </div>
                       </div>
 
                       {/* Middle Section - Form & Ratings */}
                       <div className="lg:col-span-4">
-                        <div className="space-y-1">
-                          {/* Top Data Row - 6 columns */}
-                          <div className="grid grid-cols-6 gap-1 text-xs">
+                        <div className="space-y-2">
+                          {/* Top Data Row - Form, Jockey, Trainer */}
+                          <div className="grid grid-cols-3 gap-3 text-sm">
                             {/* Form */}
                           <div>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
+                              <div className={`text-sm font-medium ${
+                                isNonRunner ? 'text-gray-500' : 'text-white'
                               }`}>FORM</div>
-                              <div className="font-mono text-xs tracking-wider">
+                              <div className="font-mono text-base tracking-wider">
                               {formatFormString(runner.form)}
                               </div>
                             </div>
                             
-                            {/* Sire/Dam */}
-                            <div>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
-                              }`}>SIRE/DAM</div>
-                              <div className={`text-xs leading-tight ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>
-                                <div className="truncate">{runner.sire || '-'}</div>
-                                <div className="truncate">{runner.damsire || '-'}</div>
-                              </div>
-                            </div>
-                            
-                            {/* Weight */}
-                            <div>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
-                              }`}>WEIGHT</div>
-                              <div className={`font-semibold text-xs ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.weight_lbs || '-'}</div>
-                            </div>
-                            
-                            {/* Flags */}
-                            <div>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
-                              }`}>FLAGS</div>
-                              <div className={`font-semibold text-xs ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.past_results_flag || '-'}</div>
-                            </div>
-                            
                             {/* Jockey */}
                             <div>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
-                              }`}>JOCKEY</div>
-                              <div className={`font-semibold text-xs ${
+                              <div className={`text-sm font-medium ${
                                 isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.jockey || '-'}</div>
+                              }`}>JOCKEY</div>
+                              <div className={`relative group font-semibold text-sm ${
+                                isNonRunner ? 'text-gray-500' : 'text-blue-400 hover:text-blue-300 cursor-pointer transition-colors'
+                              }`}>
+                                {runner.jockey || '-'}
+                                
+                                {/* Jockey Stats Tooltip */}
+                                {runner.jockey && (() => {
+                                  // Parse comma-separated stats
+                                  const lifetimeStats = parseJockeyTrainerStats(runner.jockey_lifetime);
+                                  const twelveMonthStats = parseJockeyTrainerStats(runner.jockey_12_months);
+                                  const threeMonthStats = parseJockeyTrainerStats(runner.jockey_3_months);
+                                  const trainerStats = parseJockeyTrainerStats(runner.jockey_trainer);
+                                  const trainer3mStats = parseJockeyTrainerStats(runner.jockey_trainer_3_months);
+                                  const ownerStats = parseJockeyTrainerStats(runner.jockey_owner);
+                                  const courseStats = parseJockeyTrainerStats(runner.jockey_course);
+                                  
+                                  // Check if any jockey stats exist
+                                  const hasLifetime = lifetimeStats;
+                                  const has12Months = twelveMonthStats;
+                                  const has3Months = threeMonthStats;
+                                  const hasTrainer = trainerStats;
+                                  const hasTrainer3m = trainer3mStats;
+                                  const hasOwner = ownerStats;
+                                  const hasCourse = courseStats;
+                                  
+                                  // Check if any data exists at all
+                                  const hasAnyData = hasLifetime || has12Months || has3Months || hasTrainer || hasTrainer3m || hasOwner || hasCourse;
+                                  
+                                  if (!hasAnyData) return null;
+                                  
+                                  // Check which columns have data
+                                  const hasRuns = lifetimeStats?.runs || twelveMonthStats?.runs || threeMonthStats?.runs || 
+                                                 trainerStats?.runs || trainer3mStats?.runs || 
+                                                 ownerStats?.runs || courseStats?.runs;
+                                  
+                                  const hasWins = lifetimeStats?.wins || twelveMonthStats?.wins || threeMonthStats?.wins || 
+                                                 trainerStats?.wins || trainer3mStats?.wins || 
+                                                 ownerStats?.wins || courseStats?.wins;
+                                  
+                                  const hasWinPct = lifetimeStats?.win_percentage || twelveMonthStats?.win_percentage || threeMonthStats?.win_percentage || 
+                                                   trainerStats?.win_percentage || trainer3mStats?.win_percentage || 
+                                                   ownerStats?.win_percentage || courseStats?.win_percentage;
+                                  
+                                  const hasPL = lifetimeStats?.profit_loss || twelveMonthStats?.profit_loss || threeMonthStats?.profit_loss || 
+                                               trainerStats?.profit_loss || trainer3mStats?.profit_loss || 
+                                               ownerStats?.profit_loss || courseStats?.profit_loss;
+                                  
+                                  const isTopHorse = index === 0;
+                                  const positionClass = isTopHorse 
+                                    ? "absolute left-full ml-2 -top-16 hidden group-hover:block bg-gray-900/95 backdrop-blur-sm text-white text-xs p-2 rounded shadow-lg z-[9999] w-[280px]"
+                                    : "absolute left-0 bottom-full mb-1 hidden group-hover:block bg-gray-900/95 backdrop-blur-sm text-white text-xs p-2 rounded shadow-lg z-[9999] w-[280px]";
+                                  
+                                  return (
+                                    <div className={positionClass}>
+                                      <table className="w-full text-[10px] border-collapse">
+                                        <thead>
+                                          <tr className="border-b border-gray-700/50">
+                                            <th className="text-left py-0.5 px-1 text-gray-400 font-medium">Category</th>
+                                            {hasRuns && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">Runs</th>}
+                                            {hasWins && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">Wins</th>}
+                                            {hasWinPct && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">Win%</th>}
+                                            {hasPL && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">P/L</th>}
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-700/30">
+                                          {hasLifetime && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Lifetime</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{lifetimeStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{lifetimeStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{lifetimeStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{lifetimeStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {has12Months && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">12 Months</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{twelveMonthStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{twelveMonthStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{twelveMonthStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{twelveMonthStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {has3Months && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">3 Months</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{threeMonthStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{threeMonthStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{threeMonthStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{threeMonthStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasTrainer && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Jockey/Trainer</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{trainerStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{trainerStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{trainerStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{trainerStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasTrainer3m && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Jockey/Trainer 3m</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{trainer3mStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{trainer3mStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{trainer3mStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{trainer3mStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasOwner && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Jockey/Owner</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{ownerStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{ownerStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{ownerStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{ownerStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasCourse && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Jockey/Course</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{courseStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{courseStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{courseStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{courseStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                             </div>
                             
                             {/* Trainer */}
                             <div>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
-                              }`}>TRAINER</div>
-                              <div className={`font-semibold text-xs ${
+                              <div className={`text-sm font-medium ${
                                 isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.trainer || '-'}</div>
+                              }`}>TRAINER</div>
+                              <div className={`relative group font-semibold text-sm ${
+                                isNonRunner ? 'text-gray-500' : 'text-blue-400 hover:text-blue-300 cursor-pointer transition-colors'
+                              }`}>
+                                {runner.trainer || '-'}
+                                
+                                {/* Trainer Stats Tooltip */}
+                                {runner.trainer && (() => {
+                                  // Parse comma-separated trainer stats
+                                  const lifetimeStats = parseJockeyTrainerStats(runner.trainer_lifetime);
+                                  const twelveMonthStats = parseJockeyTrainerStats(runner.trainer_12_months);
+                                  const threeMonthStats = parseJockeyTrainerStats(runner.trainer_3_months);
+                                  const jockeyStats = parseJockeyTrainerStats(runner.trainer_jockey);
+                                  const jockey3mStats = parseJockeyTrainerStats(runner.trainer_jockey_3_months);
+                                  const ownerStats = parseJockeyTrainerStats(runner.trainer_owner);
+                                  const courseStats = parseJockeyTrainerStats(runner.trainer_course);
+                                  
+                                  // Check if any trainer stats exist
+                                  const hasLifetime = lifetimeStats;
+                                  const has12Months = twelveMonthStats;
+                                  const has3Months = threeMonthStats;
+                                  const hasJockey = jockeyStats;
+                                  const hasJockey3m = jockey3mStats;
+                                  const hasOwner = ownerStats;
+                                  const hasCourse = courseStats;
+                                  
+                                  // Check if any data exists at all
+                                  const hasAnyData = hasLifetime || has12Months || has3Months || hasJockey || hasJockey3m || hasOwner || hasCourse || runner.trainer_rtf;
+                                  
+                                  if (!hasAnyData) return null;
+                                  
+                                  // Check which columns have data
+                                  const hasRuns = lifetimeStats?.runs || twelveMonthStats?.runs || threeMonthStats?.runs || 
+                                                 jockeyStats?.runs || jockey3mStats?.runs || 
+                                                 ownerStats?.runs || courseStats?.runs;
+                                  
+                                  const hasWins = lifetimeStats?.wins || twelveMonthStats?.wins || threeMonthStats?.wins || 
+                                                 jockeyStats?.wins || jockey3mStats?.wins || 
+                                                 ownerStats?.wins || courseStats?.wins;
+                                  
+                                  const hasWinPct = lifetimeStats?.win_percentage || twelveMonthStats?.win_percentage || threeMonthStats?.win_percentage || 
+                                                   jockeyStats?.win_percentage || jockey3mStats?.win_percentage || 
+                                                   ownerStats?.win_percentage || courseStats?.win_percentage;
+                                  
+                                  const hasPL = lifetimeStats?.profit_loss || twelveMonthStats?.profit_loss || threeMonthStats?.profit_loss || 
+                                               jockeyStats?.profit_loss || jockey3mStats?.profit_loss || 
+                                               ownerStats?.profit_loss || courseStats?.profit_loss;
+
+                                  // If we only have RTF but no other data, show a simplified tooltip
+                                  if (!hasRuns && !hasWins && !hasWinPct && !hasPL && runner.trainer_rtf) {
+                                    const isTopHorse = index === 0;
+                                    const rtfPositionClass = isTopHorse 
+                                      ? "absolute left-full ml-2 -top-16 hidden group-hover:block bg-gray-900/95 backdrop-blur-sm text-white text-xs p-2 rounded shadow-lg z-[9999]"
+                                      : "absolute left-0 bottom-full mb-1 hidden group-hover:block bg-gray-900/95 backdrop-blur-sm text-white text-xs p-2 rounded shadow-lg z-[9999]";
+                                    
+                                    return (
+                                      <div className={rtfPositionClass}>
+                                        <div className="flex items-center space-x-1 text-[9px]">
+                                          <span className="text-gray-400">Runs To Form:</span>
+                                          <span className="font-medium">{runner.trainer_rtf}%</span>
                             </div>
                           </div>
-                          
-                          {/* Ratings Grid */}
-                          <div className="grid grid-cols-4 gap-0.5">
-                            <div className={`px-1 py-0.5 rounded text-center ${
-                              isNonRunner ? 'bg-gray-500/10' : 'bg-blue-500/10'
-                            }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-blue-400'
-                              }`}>RPR</div>
-                              <div className={`font-bold text-xs ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.rpr || '-'}</div>
+                                    );
+                                  }
+                                  
+                                  const isTopHorse = index === 0;
+                                  const mainPositionClass = isTopHorse 
+                                    ? "absolute left-full ml-2 -top-16 hidden group-hover:block bg-gray-900/95 backdrop-blur-sm text-white text-xs p-2 rounded shadow-lg z-[9999] w-[280px]"
+                                    : "absolute left-0 bottom-full mb-1 hidden group-hover:block bg-gray-900/95 backdrop-blur-sm text-white text-xs p-2 rounded shadow-lg z-[9999] w-[280px]";
+                                  
+                                  return (
+                                    <div className={mainPositionClass}>
+                                      <table className="w-full text-[10px] border-collapse">
+                                        <thead>
+                                          <tr className="border-b border-gray-700/50">
+                                            <th className="text-left py-0.5 px-1 text-gray-400 font-medium">Category</th>
+                                            {hasRuns && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">Runs</th>}
+                                            {hasWins && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">Wins</th>}
+                                            {hasWinPct && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">Win%</th>}
+                                            {hasPL && <th className="text-center py-0.5 px-0.5 text-gray-400 font-medium">P/L</th>}
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-700/30">
+                                          {hasLifetime && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Lifetime</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{lifetimeStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{lifetimeStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{lifetimeStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{lifetimeStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {has12Months && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">12 Months</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{twelveMonthStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{twelveMonthStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{twelveMonthStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{twelveMonthStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {has3Months && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">3 Months</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{threeMonthStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{threeMonthStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{threeMonthStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{threeMonthStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasJockey && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Trainer/Jockey</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{jockeyStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{jockeyStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{jockeyStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{jockeyStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasJockey3m && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Trainer/Jockey 3m</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{jockey3mStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{jockey3mStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{jockey3mStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{jockey3mStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasOwner && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Trainer/Owner</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{ownerStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{ownerStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{ownerStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{ownerStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                          {hasCourse && (
+                                            <tr>
+                                              <td className="text-left py-1 px-2">Trainer/Course</td>
+                                              {hasRuns && <td className="text-center py-1 px-1">{courseStats?.runs || '-'}</td>}
+                                              {hasWins && <td className="text-center py-1 px-1">{courseStats?.wins || '-'}</td>}
+                                              {hasWinPct && <td className="text-center py-1 px-1">{courseStats?.win_percentage || '-'}</td>}
+                                              {hasPL && <td className="text-center py-1 px-1">{courseStats?.profit_loss || '-'}</td>}
+                                            </tr>
+                                          )}
+                                        </tbody>
+                                      </table>
+                                      
+                                      {/* Runs To Form */}
+                                      {runner.trainer_rtf && (
+                                        <div className="mt-0.5 pt-0.5 border-t border-gray-700/30">
+                                          <div className="flex justify-between items-center text-[9px]">
+                                            <span className="text-gray-400">Runs To Form:</span>
+                                            <span className="font-medium">{runner.trainer_rtf}%</span>
                             </div>
-                            <div className={`px-1 py-0.5 rounded text-center ${
-                              isNonRunner ? 'bg-gray-500/10' : 'bg-purple-500/10'
-                            }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-purple-400'
-                              }`}>TS</div>
-                              <div className={`font-bold text-xs ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.ts || '-'}</div>
                             </div>
-                            <div className={`px-1 py-0.5 rounded text-center ${
-                              isNonRunner ? 'bg-gray-500/10' : 'bg-orange-500/10'
-                            }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-orange-400'
-                              }`}>OFR</div>
-                              <div className={`font-bold text-xs ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.ofr || '-'}</div>
+                                      )}
                             </div>
-                            <div className={`px-1 py-0.5 rounded text-center ${
-                              isNonRunner ? 'bg-gray-500/10' : 'bg-green-500/10'
-                            }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-green-400'
-                              }`}>LR</div>
-                              <div className={`font-bold text-xs ${
-                                isNonRunner ? 'text-gray-500' : 'text-white'
-                              }`}>{runner.last_run || '-'}</div>
+                                  );
+                                })()}
+                              </div>
                             </div>
                           </div>
 
-                          {/* Placeholder Data Blocks */}
-                          <div className="grid grid-cols-5 gap-0.5">
-                            <div className="bg-gray-500/10 px-1 py-0.5 rounded text-center">
-                              <div className="text-xs text-gray-500">SP</div>
-                              <div className="text-gray-400 text-xs">-</div>
+                          {/* Data Point Boxes */}
+                          <div className="mt-3 grid grid-cols-7 gap-1">
+                            {/* OR - Official Rating */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">OR</div>
+                              <div className="text-sm font-medium text-white">{runner.ofr || '-'}</div>
                             </div>
-                            <div className="bg-gray-500/10 px-1 py-0.5 rounded text-center">
-                              <div className="text-xs text-gray-500">CLS</div>
-                              <div className="text-gray-400 text-xs">-</div>
+                            
+                            {/* OVO - OddsVantage Odds */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">OVO</div>
+                              <div className="text-sm font-medium text-white">
+                                {runner['7.8_raw'] ? parseFloat(runner['7.8_raw']).toFixed(2) : '-'}
+                              </div>
                             </div>
-                            <div className="bg-gray-500/10 px-1 py-0.5 rounded text-center">
-                              <div className="text-xs text-gray-500">DST</div>
-                              <div className="text-gray-400 text-xs">-</div>
+                            
+                            {/* RPO - Racing Post Odds */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">RPO</div>
+                              <div className="text-sm font-medium text-white">
+                                {runner.RPR_odds ? parseFloat(runner.RPR_odds).toFixed(2) : '-'}
+                              </div>
                             </div>
-                            <div className="bg-gray-500/10 px-1 py-0.5 rounded text-center">
-                              <div className="text-xs text-gray-500">TRK</div>
-                              <div className="text-gray-400 text-xs">-</div>
+                            
+                            {/* TFO - Timeform Odds */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">TFO</div>
+                              <div className="text-sm font-medium text-white">
+                                {runner.TFR_odds ? parseFloat(runner.TFR_odds).toFixed(2) : '-'}
+                              </div>
                             </div>
-                            <div className="bg-gray-500/10 px-1 py-0.5 rounded text-center">
-                              <div className="text-xs text-gray-500">G</div>
-                              <div className="text-gray-400 text-xs">-</div>
+
+                            {/* TS - Time Score */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">TS</div>
+                              <div className="text-sm font-medium text-white">{runner.ts || '-'}</div>
+                          </div>
+                            
+                            {/* GS - Going Score */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">GS</div>
+                              <div className="text-sm font-medium text-white">
+                                {(runner.goodRunGoing !== null && runner.goodRunGoing !== undefined) ? parseFloat(runner.goodRunGoing).toFixed(2) : '-'}
+                              </div>
+                            </div>
+                            
+                            {/* PS - Pace Score */}
+                            <div className="bg-gray-800/50 border border-gray-700/50 rounded-md p-1.5 text-center">
+                              <div className="text-xs text-gray-400 mb-0.5">PS</div>
+                              <div className="text-sm font-medium text-white">
+                                {(runner.paceRel !== null && runner.paceRel !== undefined) ? parseFloat(runner.paceRel).toFixed(2) : '-'}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1389,14 +1995,14 @@ export default function HandicapRacecard() {
                       <div className="lg:col-span-5">
                         <div className="space-y-1">
 
-                          {/* Best Odds Display - Compact 2x2 Grid */}
-                          <div className="grid grid-cols-2 gap-0.5">
+                          {/* Best Odds Display - Compact 3x2 Grid */}
+                          <div className="grid grid-cols-3 gap-0.5">
                             {/* Live Best Odds */}
-                            <div className={`px-1 py-0.5 rounded text-center ${
+                            <div className={`px-0.5 py-0.5 rounded text-center ${
                               isNonRunner ? 'bg-gray-500/10' : 'bg-betting-green/10'
                             }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
+                              <div className={`text-[10px] ${
+                                isNonRunner ? 'text-gray-600' : 'text-white'
                               }`}>Live BO</div>
                               <div className={`font-bold text-xs ${
                                 isNonRunner ? 'text-gray-500' : 'text-betting-green'
@@ -1407,19 +2013,19 @@ export default function HandicapRacecard() {
                               {!isNonRunner && (() => {
                                 const liveOdds = getLiveBestOdds(runnerOdds);
                                 return liveOdds.bookmaker ? (
-                                  <div className="text-xs text-gray-500 truncate">
+                                  <div className="text-[9px] text-gray-500 truncate">
                                     ({formatBookmakerName(liveOdds.bookmaker)})
                             </div>
-                                ) : <div className="text-xs h-3">&nbsp;</div>;
+                                ) : <div className="text-[9px] h-2">&nbsp;</div>;
                               })()}
                           </div>
 
                             {/* Best Opening Odds */}
-                            <div className={`px-1 py-0.5 rounded text-center ${
+                            <div className={`px-0.5 py-0.5 rounded text-center ${
                               isNonRunner ? 'bg-gray-500/10' : 'bg-blue-500/10'
                             }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
+                              <div className={`text-[10px] ${
+                                isNonRunner ? 'text-gray-600' : 'text-white'
                               }`}>Opening</div>
                               <div className={`font-bold text-xs ${
                                 isNonRunner ? 'text-gray-500' : 'text-blue-400'
@@ -1430,19 +2036,19 @@ export default function HandicapRacecard() {
                               {!isNonRunner && (() => {
                                 const openingOdds = getBestOpeningOdds(runnerOdds);
                                 return openingOdds.bookmaker ? (
-                                  <div className="text-xs text-gray-500 truncate">
+                                  <div className="text-[9px] text-gray-500 truncate">
                                     ({formatBookmakerName(openingOdds.bookmaker)})
                               </div>
-                                ) : <div className="text-xs h-3">&nbsp;</div>;
+                                ) : <div className="text-[9px] h-2">&nbsp;</div>;
                               })()}
                           </div>
 
                             {/* Day High */}
-                            <div className={`px-1 py-0.5 rounded text-center ${
+                            <div className={`px-0.5 py-0.5 rounded text-center ${
                               isNonRunner ? 'bg-gray-500/10' : 'bg-orange-500/10'
                             }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
+                              <div className={`text-[10px] ${
+                                isNonRunner ? 'text-gray-600' : 'text-white'
                               }`}>Day High</div>
                               <div className={`font-bold text-xs ${
                                 isNonRunner ? 'text-gray-500' : 'text-orange-400'
@@ -1453,19 +2059,19 @@ export default function HandicapRacecard() {
                               {!isNonRunner && (() => {
                                 const highLow = getHighLowOdds(runnerOdds);
                                 return highLow.high.bookmaker ? (
-                                  <div className="text-xs text-gray-500 truncate">
+                                  <div className="text-[9px] text-gray-500 truncate">
                                     ({formatBookmakerName(highLow.high.bookmaker)} {highLow.high.time})
                               </div>
-                                ) : <div className="text-xs h-3">&nbsp;</div>;
+                                ) : <div className="text-[9px] h-2">&nbsp;</div>;
                               })()}
                               </div>
 
                             {/* Day Low */}
-                            <div className={`px-1 py-0.5 rounded text-center ${
+                            <div className={`px-0.5 py-0.5 rounded text-center ${
                               isNonRunner ? 'bg-gray-500/10' : 'bg-purple-500/10'
                             }`}>
-                              <div className={`text-xs ${
-                                isNonRunner ? 'text-gray-600' : 'text-gray-400'
+                              <div className={`text-[10px] ${
+                                isNonRunner ? 'text-gray-600' : 'text-white'
                               }`}>Day Low</div>
                               <div className={`font-bold text-xs ${
                                 isNonRunner ? 'text-gray-500' : 'text-purple-400'
@@ -1476,36 +2082,257 @@ export default function HandicapRacecard() {
                               {!isNonRunner && (() => {
                                 const highLow = getHighLowOdds(runnerOdds);
                                 return highLow.low.bookmaker ? (
-                                  <div className="text-xs text-gray-500 truncate">
+                                  <div className="text-[9px] text-gray-500 truncate">
                                     ({formatBookmakerName(highLow.low.bookmaker)} {highLow.low.time})
                               </div>
-                                ) : <div className="text-xs h-3">&nbsp;</div>;
+                                ) : <div className="text-[9px] h-2">&nbsp;</div>;
                               })()}
                               </div>
+
+                            {/* Average Odds */}
+                            <div className={`px-0.5 py-0.5 rounded text-center ${
+                              isNonRunner ? 'bg-gray-500/10' : 'bg-cyan-500/10'
+                            }`}>
+                              <div className={`text-[10px] ${
+                                isNonRunner ? 'text-gray-600' : 'text-white'
+                              }`}>Avg Odds</div>
+                              <div className={`font-bold text-xs ${
+                                isNonRunner ? 'text-gray-500' : 'text-cyan-400'
+                              }`}>{isNonRunner ? 'N/A' : getLiveAverageOdds(runner)}</div>
+                              <div className="text-[9px] text-gray-500 truncate">
+                                (Bookmaker Average)
                               </div>
+                              </div>
+
+                            {/* Sharp Odds */}
+                            <div className={`px-0.5 py-0.5 rounded text-center ${
+                              isNonRunner ? 'bg-gray-500/10' : 'bg-red-500/10'
+                            }`}>
+                              <div className={`text-[10px] ${
+                                isNonRunner ? 'text-gray-600' : 'text-white'
+                              }`}>Sharp Odds</div>
+                              <div className={`font-bold text-xs ${
+                                isNonRunner ? 'text-gray-500' : 'text-red-400'
+                              }`}>{isNonRunner ? 'N/A' : getLiveSharpAverageOdds(runner)}</div>
+                              <div className="text-[9px] text-gray-500 truncate">
+                                (Exchange Weighted Odds)
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Second Row - Mini Data Boxes */}
+                          <div className="grid grid-cols-6 gap-0.5 mt-1">
+                            {/* Price Change */}
+                            <div className="bg-orange-500/10 px-0.5 py-1 rounded text-center min-h-[35px]">
+                              <div className="text-[9px] text-white">Price Change</div>
+                              <div className="text-[10px] font-bold text-orange-400">{parseLatestPriceChange(runner.price_change)}</div>
+                            </div>
+
+                            {/* No-Vig Odds */}
+                            <div className="bg-purple-500/10 px-0.5 py-1 rounded text-center min-h-[35px]">
+                              <div className="text-[9px] text-white">No-Vig Odds</div>
+                              <div className="text-[10px] font-bold text-purple-400">
+                                {runner.vig_average_odds ? parseFloat(runner.vig_average_odds).toFixed(2) : 'N/A'}
+                              </div>
+                      </div>
+
+                            {/* Market Pressure */}
+                            <div className="bg-yellow-500/10 px-0.5 py-1 rounded text-center min-h-[35px]">
+                              <div className="text-[9px] text-white">Market Pressure</div>
+                              <div className="text-[10px] font-bold text-yellow-400">{parseLatestPercentage(runner.market_pressure_shortening)}</div>
+                    </div>
+
+                            {/* Momentum */}
+                            <div className="bg-sky-500/10 px-0.5 py-1 rounded text-center min-h-[35px]">
+                              <div className="text-[9px] text-white">Momentum</div>
+                              <div className="text-[10px] font-bold text-sky-400">{parseLatestPercentage(runner.momentum_steaming)}</div>
+                            </div>
+
+                            {/* Support Level */}
+                            <div className="bg-green-500/10 px-0.5 py-1 rounded text-center min-h-[35px]">
+                              <div className="text-[9px] text-white">Support</div>
+                              <div className="text-[10px] font-bold text-green-400">{parseLatestLevel(runner.resistance_levels)}</div>
+                            </div>
+
+                            {/* Resistance Level */}
+                            <div className="bg-red-500/10 px-0.5 py-1 rounded text-center min-h-[35px]">
+                              <div className="text-[9px] text-white">Resistance</div>
+                              <div className="text-[10px] font-bold text-red-400">{parseLatestLevel(runner.support_levels)}</div>
+                            </div>
+                          </div>
 
 
                             </div>
                       </div>
                     </div>
 
-                    {/* Bottom Row - Comments & Special Info */}
-                    {(runner.comment || runner.spotlight) && (
-                      <div className="mt-4 pt-4 border-t border-betting-green/10">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                          {runner.comment && (
-                            <div className="bg-blue-500/10 p-2 rounded">
-                              <div className="text-blue-400 font-semibold">COMMENT</div>
-                              <div className="text-white">{runner.comment}</div>
+                    {/* Button to expand/collapse card */}
+                    <div className="mt-3 flex justify-center">
+                      <button
+                        onClick={() => toggleCardExpansion(runner.horse_id)}
+                        className="flex flex-col items-center justify-center w-10 h-10 rounded-full bg-gray-700/50 hover:bg-gray-600/50 transition text-white text-xs"
+                      >
+                        <span>PP</span>
+                        {expandedCards[runner.horse_id] ? (
+                          <ChevronUp size={12} />
+                        ) : (
+                          <ChevronDown size={12} />
+                        )}
+                      </button>
                             </div>
-                          )}
-                          {runner.spotlight && (
-                            <div className="bg-yellow-500/10 p-2 rounded">
-                              <div className="text-yellow-400 font-semibold">SPOTLIGHT</div>
-                              <div className="text-white">{runner.spotlight}</div>
-                            </div>
-                          )}
+
+                    {/* Collapsible section for past performances and comments */}
+                    {expandedCards[runner.horse_id] && (
+                      <div className="mt-3 space-y-3 animate-fadeIn">
+                        {/* Past Performances Table */}
+                        <div className="bg-gray-800/80 rounded-lg overflow-hidden shadow-md">
+                          <div className="bg-gray-700/50 px-3 py-2 border-b border-gray-600/30">
+                            <h4 className="text-sm font-medium text-white">Past Performances</h4>
+                          </div>
+                          <div className="p-2 overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead className="bg-gray-700/30 text-gray-300">
+                                <tr>
+                                  <th className="p-1 text-left w-16">Date</th>
+                                  <th className="p-1 text-left w-8">Track</th>
+                                  <th className="p-1 text-left w-20">Jockey</th>
+                                  <th className="p-1 text-center w-12">Fin Pos</th>
+                                  <th className="p-1 text-center w-12">BTN</th>
+                                  <th className="p-1 text-center w-12">OR</th>
+                                  <th className="p-1 text-center w-14">Surface</th>
+                                  <th className="p-1 text-center w-12">Dist</th>
+                                  <th className="p-1 text-left w-16">Going</th>
+                                  <th className="p-1 text-center w-14">BSP</th>
+                                  <th className="p-1 text-center w-16">Speed Fig</th>
+                                  <th className="p-1 text-center w-14">Rating</th>
+                                  <th className="p-1 text-center w-20">IP Hi/Lo</th>
+                                  <th className="p-1 text-center w-16">Run Style</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-700/30">
+                                {/* Generate rows for past performances if available */}
+                                {[1, 2, 3, 4, 5, 6].map(ppNum => {
+                                  // Check if this pp exists
+                                  const dateField = `pp_${ppNum}_date` as keyof typeof runner.timeform;
+                                  
+                                  // Skip if no timeform data or no date for this past performance
+                                  if (!runner.timeform || !runner.timeform[dateField]) return null;
+                                  
+                                  // Get all fields for this pp
+                                  const trackField = `pp_${ppNum}_track` as keyof typeof runner.timeform;
+                                  const resultField = `pp_${ppNum}_result` as keyof typeof runner.timeform;
+                                  const btnField = `pp_${ppNum}_btn` as keyof typeof runner.timeform;
+                                  const typeField = `pp_${ppNum}_type` as keyof typeof runner.timeform;
+                                  const orField = `pp_${ppNum}_or` as keyof typeof runner.timeform;
+                                  const disField = `pp_${ppNum}_dis` as keyof typeof runner.timeform;
+                                  const goingField = `pp_${ppNum}_going` as keyof typeof runner.timeform;
+                                  const eqField = `pp_${ppNum}_eq` as keyof typeof runner.timeform;
+                                  const jockeyField = `pp_${ppNum}_jockey` as keyof typeof runner.timeform;
+                                  const ispField = `pp_${ppNum}_isp` as keyof typeof runner.timeform;
+                                  const bspField = `pp_${ppNum}_bsp` as keyof typeof runner.timeform;
+                                  const iphiloField = `pp_${ppNum}_iphilo` as keyof typeof runner.timeform;
+                                  const ipsField = `pp_${ppNum}_ips` as keyof typeof runner.timeform;
+                                  const fsField = `pp_${ppNum}_fs` as keyof typeof runner.timeform;
+                                  const tfigField = `pp_${ppNum}_tfig` as keyof typeof runner.timeform;
+                                  const tfrField = `pp_${ppNum}_tfr` as keyof typeof runner.timeform;
+                                  const adjField = `pp_${ppNum}_adj` as keyof typeof runner.timeform;
+                                  
+                                  return (
+                                    <tr key={ppNum} className="hover:bg-gray-700/20">
+                                      <td className="p-1 text-white">{runner.timeform[dateField] ? new Date(runner.timeform[dateField] as string).toLocaleDateString() : '-'}</td>
+                                      <td className="p-1 text-white">{normalizeTrackName(runner.timeform[trackField])}</td>
+                                      <td className="p-1 text-white">{runner.timeform[jockeyField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[resultField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[btnField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[orField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[typeField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[disField] || '-'}</td>
+                                      <td className="p-1 text-white">{runner.timeform[goingField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[bspField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[tfigField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[adjField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[iphiloField] || '-'}</td>
+                                      <td className="p-1 text-white text-center">{runner.timeform[ipsField] || '-'}</td>
+                                    </tr>
+                                  );
+                                })}
+                                {/* If no past performances available */}
+                                {!runner.timeform || ![1, 2, 3, 4, 5, 6].some(ppNum => {
+                                  const dateField = `pp_${ppNum}_date` as keyof typeof runner.timeform;
+                                  return runner.timeform && !!runner.timeform[dateField];
+                                }) && (
+                                  <tr>
+                                    <td colSpan={18} className="p-2 text-center text-gray-400">No past performance data available</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
+                        
+                        {/* Comments & Spotlight */}
+                        {(runner.spotlight || (runner.timeform && runner.timeform.spotlight) || (() => {
+                          // Check if there's a timeform rating note
+                          let rating = null;
+                          if (runner.timeform) {
+                            if (Array.isArray(runner.timeform) && runner.timeform.length > 0) {
+                              rating = runner.timeform[0].timeform_rating;
+                            } else if (typeof runner.timeform === 'object') {
+                              rating = runner.timeform.timeform_rating;
+                            }
+                          }
+                          return getTimeformRatingNote(rating) !== null;
+                        })()) && (
+                          <div className="grid grid-cols-1 gap-3">
+                            {/* General Comments Section */}
+                            {(runner.spotlight || (runner.timeform && runner.timeform.spotlight)) && (
+                              <div className="bg-gray-800/60 p-3 rounded-lg border border-gray-700/50">
+                                <div className="flex items-center space-x-2 mb-2">
+                                  <div className="w-1 h-5 bg-blue-500 rounded-sm"></div>
+                                  <div className="text-white font-semibold text-xs">General Comments</div>
+                                </div>
+                                <div className="text-gray-200 text-sm leading-relaxed">
+                                  {runner.timeform?.spotlight || runner.spotlight}
+                        </div>
+                              </div>
+                            )}
+                            
+                            {/* Key Notes Section - Only show if there's a note */}
+                            {(() => {
+                              // Get the rating using the same approach
+                              let rating = null;
+                              
+                              if (runner.timeform) {
+                                if (Array.isArray(runner.timeform) && runner.timeform.length > 0) {
+                                  rating = runner.timeform[0].timeform_rating;
+                                } else if (typeof runner.timeform === 'object') {
+                                  rating = runner.timeform.timeform_rating;
+                                }
+                              }
+                              
+                              const note = getTimeformRatingNote(rating);
+                              
+                              if (note) {
+                                return (
+                                  <div className="bg-gray-800/60 p-3 rounded-lg border border-gray-700/50">
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <div className="w-1 h-5 bg-amber-500 rounded-sm"></div>
+                                      <div className="text-white font-semibold text-xs">Key Notes</div>
+                                    </div>
+                                    <div className="flex items-start space-x-2">
+                                      <div className="text-amber-400 mt-0.5">•</div>
+                                      <div className="text-gray-200 text-sm leading-relaxed">
+                                        {note}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              
+                              return null;
+                            })()}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1757,18 +2584,22 @@ export default function HandicapRacecard() {
 
                   return (
                     <div className="space-y-6">
-                      {/* Bookmaker Toggle Controls */}
-                      <div className="p-5 bg-gradient-to-r from-gray-800/40 via-gray-700/40 to-gray-800/40 border border-gray-500/30 rounded-xl shadow-lg backdrop-blur-sm">
-                        <div className="flex items-center space-x-3 mb-4">
+                      {/* Combined Chart Controls */}
+                      <div className="p-4 bg-gradient-to-r from-gray-800/40 via-gray-700/40 to-gray-800/40 border border-gray-500/30 rounded-xl shadow-lg backdrop-blur-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-2">
                           <div className="w-2 h-2 bg-gradient-to-r from-betting-green to-green-400 rounded-full"></div>
-                          <h3 className="text-sm font-semibold text-gray-200 tracking-wide">
-                            Toggle Bookmakers
-                          </h3>
+                            <h3 className="text-sm font-semibold text-gray-200">Chart Controls</h3>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+                        </div>
+                        
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Bookmakers Section */}
+                          <div>
+                            <h4 className="text-xs font-medium text-gray-300 mb-2">Bookmakers</h4>
+                            <div className="grid grid-cols-3 xl:grid-cols-4 gap-2">
                           {availableBookmakers.map(bookmaker => (
-                            <label key={bookmaker.key} className="group flex items-center space-x-3 p-3 bg-gradient-to-r from-gray-700/30 to-gray-600/30 rounded-lg border border-gray-600/20 hover:border-gray-500/40 transition-all duration-300 cursor-pointer hover:shadow-md">
-                              <div className="relative">
+                                <label key={bookmaker.key} className="group flex items-center space-x-2 p-2 bg-gray-700/20 rounded border border-gray-600/20 hover:border-gray-500/30 transition cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={enabledBookmakers.has(bookmaker.key)}
@@ -1781,28 +2612,58 @@ export default function HandicapRacecard() {
                                     }
                                     setEnabledBookmakers(newEnabled);
                                   }}
-                                  className="sr-only"
-                                />
-                                <div className={`w-4 h-4 rounded border-2 transition-all duration-200 ${
-                                  enabledBookmakers.has(bookmaker.key) 
-                                    ? 'bg-gradient-to-r from-betting-green to-green-400 border-betting-green shadow-lg' 
-                                    : 'border-gray-500 bg-gray-700/50'
-                                }`}>
-                                  {enabledBookmakers.has(bookmaker.key) && (
-                                    <svg className="w-3 h-3 text-white ml-0.5 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                    </svg>
-                                  )}
-                                </div>
-                              </div>
+                                    className="w-3 h-3 rounded border border-gray-500 bg-gray-700/50 checked:bg-betting-green checked:border-betting-green"
+                                  />
                               <span 
-                                className="text-xs font-medium truncate transition-colors duration-200 group-hover:text-white" 
+                                    className="text-xs truncate transition-colors group-hover:text-white" 
                                 style={{ color: enabledBookmakers.has(bookmaker.key) ? getBookmakerColor(bookmaker.key) : '#9CA3AF' }}
                               >
                                 {formatBookmakerName(bookmaker.key)}
                               </span>
                             </label>
                           ))}
+                            </div>
+                          </div>
+
+                          {/* Data Types Section */}
+                          <div>
+                            <h4 className="text-xs font-medium text-gray-300 mb-2">Data Types</h4>
+                            <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                              {[
+                                { key: 'average_odds', name: 'Avg Odds' },
+                                { key: 'sharp_average_odds', name: 'Sharp' },
+                                { key: '5_moving_average', name: '5m MA' },
+                                { key: '20_moving_average', name: '20m MA' },
+                                { key: '60_moving_average', name: '60m MA' },
+                                { key: '5_bollinger_bands', name: '5m BB' },
+                                { key: '20_bollinger_bands', name: '20m BB' },
+                                { key: '60_bollinger_bands', name: '60m BB' }
+                              ].map(dataType => (
+                                <label key={dataType.key} className="group flex items-center space-x-2 p-2 bg-gray-700/20 rounded border border-gray-600/20 hover:border-gray-500/30 transition cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={enabledDataTypes.has(dataType.key)}
+                                    onChange={(e) => {
+                                      const newEnabled = new Set(enabledDataTypes);
+                                      if (e.target.checked) {
+                                        newEnabled.add(dataType.key);
+                                      } else {
+                                        newEnabled.delete(dataType.key);
+                                      }
+                                      setEnabledDataTypes(newEnabled);
+                                    }}
+                                    className="w-3 h-3 rounded border border-gray-500 bg-gray-700/50 checked:bg-betting-green checked:border-betting-green"
+                                  />
+                                  <span 
+                                    className="text-xs truncate transition-colors group-hover:text-white" 
+                                    style={{ color: enabledDataTypes.has(dataType.key) ? getDataTypeColor(dataType.key) : '#9CA3AF' }}
+                                  >
+                                    {dataType.name}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
@@ -2000,6 +2861,157 @@ export default function HandicapRacecard() {
                                   );
                                 })}
 
+                              {/* Data Type Lines (Runner data) */}
+                              {enabledDataTypes.has('average_odds') || enabledDataTypes.has('sharp_average_odds') || 
+                               enabledDataTypes.has('5_moving_average') || enabledDataTypes.has('20_moving_average') || enabledDataTypes.has('60_moving_average') ? 
+                                (() => {
+                                  const selectedRunner = uniqueRunners.find(r => r.horse_id === selectedHorseForChart);
+                                  if (!selectedRunner) return null;
+
+                                  return (
+                                    <g>
+                                      {/* Average Odds Line */}
+                                      {enabledDataTypes.has('average_odds') && (() => {
+                                        const data = getRunnerChartData(selectedRunner, 'average_odds');
+                                        if (data.length < 2) return null;
+
+                                        const pathD = data.map((point, index) => {
+                                          const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                          const y = chartHeight + padding - ((point.odds - minOdds) / oddsRange) * chartHeight;
+                                          return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                        }).join(' ');
+
+                                        const color = getDataTypeColor('average_odds');
+
+                                        return (
+                                          <g key="average_odds">
+                                            <path d={pathD} fill="none" stroke={color} strokeWidth="4" opacity="0.8" strokeDasharray="5,5" />
+                                            {data.map((point, index) => {
+                                              const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                              const y = chartHeight + padding - ((point.odds - minOdds) / oddsRange) * chartHeight;
+                                              return (
+                                                <circle key={index} cx={x} cy={y} r="3" fill={color} stroke="#1f2937" strokeWidth="1">
+                                                  <title>Average Odds: {point.odds.toFixed(2)}</title>
+                                                </circle>
+                                              );
+                                            })}
+                                          </g>
+                                        );
+                                      })()}
+
+                                      {/* Sharp Average Odds Line */}
+                                      {enabledDataTypes.has('sharp_average_odds') && (() => {
+                                        const data = getRunnerChartData(selectedRunner, 'sharp_average_odds');
+                                        if (data.length < 2) return null;
+
+                                        const pathD = data.map((point, index) => {
+                                          const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                          const y = chartHeight + padding - ((point.odds - minOdds) / oddsRange) * chartHeight;
+                                          return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                        }).join(' ');
+
+                                        const color = getDataTypeColor('sharp_average_odds');
+
+                                        return (
+                                          <g key="sharp_average_odds">
+                                            <path d={pathD} fill="none" stroke={color} strokeWidth="4" opacity="0.8" strokeDasharray="10,5" />
+                                            {data.map((point, index) => {
+                                              const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                              const y = chartHeight + padding - ((point.odds - minOdds) / oddsRange) * chartHeight;
+                                              return (
+                                                <circle key={index} cx={x} cy={y} r="3" fill={color} stroke="#1f2937" strokeWidth="1">
+                                                  <title>Sharp Average Odds: {point.odds.toFixed(2)}</title>
+                                                </circle>
+                                              );
+                                            })}
+                                          </g>
+                                        );
+                                      })()}
+
+                                      {/* Moving Average Lines */}
+                                      {['5_moving_average', '20_moving_average', '60_moving_average'].map(maType => {
+                                        if (!enabledDataTypes.has(maType)) return null;
+                                        
+                                        const data = getRunnerChartData(selectedRunner, maType);
+                                        if (data.length < 2) return null;
+
+                                        const pathD = data.map((point, index) => {
+                                          const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                          const y = chartHeight + padding - ((point.odds - minOdds) / oddsRange) * chartHeight;
+                                          return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                        }).join(' ');
+
+                                        const color = getDataTypeColor(maType);
+
+                                        return (
+                                          <g key={maType}>
+                                            <path d={pathD} fill="none" stroke={color} strokeWidth="3" opacity="0.9" />
+                                            {data.map((point, index) => {
+                                              const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                              const y = chartHeight + padding - ((point.odds - minOdds) / oddsRange) * chartHeight;
+                                              return (
+                                                <circle key={index} cx={x} cy={y} r="2.5" fill={color} stroke="#1f2937" strokeWidth="1">
+                                                  <title>{maType.replace('_', ' ').toUpperCase()}: {point.odds.toFixed(2)}</title>
+                                                </circle>
+                                              );
+                                            })}
+                                          </g>
+                                        );
+                                      })}
+
+                                      {/* Bollinger Bands */}
+                                      {['5_bollinger_bands', '20_bollinger_bands', '60_bollinger_bands'].map(bbType => {
+                                        if (!enabledDataTypes.has(bbType)) return null;
+                                        
+                                        const data = getBollingerBandsChartData(selectedRunner, bbType);
+                                        if (data.length < 2) return null;
+
+                                        const color = getDataTypeColor(bbType);
+                                        
+                                        // Create path for upper band
+                                        const upperPathD = data.map((point, index) => {
+                                          const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                          const y = chartHeight + padding - ((point.upper - minOdds) / oddsRange) * chartHeight;
+                                          return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                        }).join(' ');
+
+                                        // Create path for lower band
+                                        const lowerPathD = data.map((point, index) => {
+                                          const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                          const y = chartHeight + padding - ((point.lower - minOdds) / oddsRange) * chartHeight;
+                                          return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                        }).join(' ');
+
+                                        // Create filled area between bands
+                                        const areaPathD = [
+                                          data.map((point, index) => {
+                                            const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                            const y = chartHeight + padding - ((point.upper - minOdds) / oddsRange) * chartHeight;
+                                            return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                          }).join(' '),
+                                          data.slice().reverse().map((point, index) => {
+                                            const x = padding + ((point.time - minTime) / timeRange) * chartWidth;
+                                            const y = chartHeight + padding - ((point.lower - minOdds) / oddsRange) * chartHeight;
+                                            return `${index === 0 ? 'L' : 'L'} ${x} ${y}`;
+                                          }).join(' '),
+                                          'Z'
+                                        ].join(' ');
+
+                                        return (
+                                          <g key={bbType}>
+                                            {/* Filled area */}
+                                            <path d={areaPathD} fill={color} opacity="0.1" />
+                                            {/* Upper band line */}
+                                            <path d={upperPathD} fill="none" stroke={color} strokeWidth="2" opacity="0.6" strokeDasharray="3,3" />
+                                            {/* Lower band line */}
+                                            <path d={lowerPathD} fill="none" stroke={color} strokeWidth="2" opacity="0.6" strokeDasharray="3,3" />
+                                          </g>
+                                        );
+                                      })}
+                                    </g>
+                                  );
+                                })() : null}
+
                               {/* Enhanced Race start time vertical line */}
                               {race?.off && (() => {
                                 const raceTime = parseTimeToMinutes(race.off);
@@ -2097,6 +3109,9 @@ export default function HandicapRacecard() {
 
                       {/* Enhanced Chart Legend */}
                       <div className="p-4 bg-gradient-to-r from-gray-800/30 via-gray-700/30 to-gray-800/30 rounded-xl border border-gray-600/20 backdrop-blur-sm">
+                        {/* Active Bookmakers */}
+                        {Array.from(enabledBookmakers).length > 0 && (
+                          <div className="mb-4">
                         <div className="flex items-center space-x-2 mb-3">
                           <div className="w-2 h-2 bg-gradient-to-r from-betting-green to-green-400 rounded-full"></div>
                           <h4 className="text-sm font-semibold text-gray-200">Active Bookmakers</h4>
@@ -2119,6 +3134,65 @@ export default function HandicapRacecard() {
                               </div>
                             ))}
                         </div>
+                          </div>
+                        )}
+
+                        {/* Active Data Types */}
+                        {Array.from(enabledDataTypes).length > 0 && (
+                          <div>
+                            <div className="flex items-center space-x-2 mb-3">
+                              <div className="w-2 h-2 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full"></div>
+                              <h4 className="text-sm font-semibold text-gray-200">Active Data Types</h4>
+                            </div>
+                            <div className="flex flex-wrap gap-4 text-sm">
+                              {[
+                                { key: 'average_odds', name: 'Average Odds', style: 'dashed' },
+                                { key: 'sharp_average_odds', name: 'Sharp Odds', style: 'dashed' },
+                                { key: '5_moving_average', name: '5min MA', style: 'solid' },
+                                { key: '20_moving_average', name: '20min MA', style: 'solid' },
+                                { key: '60_moving_average', name: '60min MA', style: 'solid' },
+                                { key: '5_bollinger_bands', name: '5min BB', style: 'bands' },
+                                { key: '20_bollinger_bands', name: '20min BB', style: 'bands' },
+                                { key: '60_bollinger_bands', name: '60min BB', style: 'bands' }
+                              ]
+                                .filter(dataType => enabledDataTypes.has(dataType.key))
+                                .map(dataType => (
+                                  <div key={dataType.key} className="flex items-center space-x-3 p-2 bg-gray-700/20 rounded-lg border border-gray-600/20">
+                                    {dataType.style === 'bands' ? (
+                                      <div className="w-4 h-3 relative">
+                                        <div 
+                                          className="absolute inset-0 rounded opacity-30"
+                                          style={{ backgroundColor: getDataTypeColor(dataType.key) }}
+                                        />
+                                        <div 
+                                          className="absolute top-0 left-0 right-0 h-0.5 rounded"
+                                          style={{ backgroundColor: getDataTypeColor(dataType.key) }}
+                                        />
+                                        <div 
+                                          className="absolute bottom-0 left-0 right-0 h-0.5 rounded"
+                                          style={{ backgroundColor: getDataTypeColor(dataType.key) }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div 
+                                        className={`w-4 h-1 rounded-full shadow-lg ${dataType.style === 'dashed' ? 'opacity-80' : ''}`}
+                                        style={{ 
+                                          backgroundColor: getDataTypeColor(dataType.key),
+                                          boxShadow: `0 0 8px ${getDataTypeColor(dataType.key)}40`,
+                                          ...(dataType.style === 'dashed' && {
+                                            backgroundImage: `repeating-linear-gradient(to right, ${getDataTypeColor(dataType.key)} 0px, ${getDataTypeColor(dataType.key)} 3px, transparent 3px, transparent 6px)`
+                                          })
+                                        }}
+                                      />
+                                    )}
+                                    <span className="text-gray-200 font-medium">
+                                      {dataType.name}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -2126,14 +3200,9 @@ export default function HandicapRacecard() {
               </div>
             </div>
           )}
-
-          {/* Footer */}
-          <div className="mt-12 text-center text-gray-400 text-sm">
-            <p>This racecard is updated in real-time from our racing data API.</p>
-            <p className="mt-2">Data provided by The Racing API • Last updated: {new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London' })}</p>
-          </div>
         </div>
       </div>
+      </PageProtection>
     </Layout>
   );
 } 

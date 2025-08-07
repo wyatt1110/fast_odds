@@ -1,34 +1,69 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '@/types/supabase';
+import { config } from '../config';
 
-// We're using environment variables in the browser, which need to be prefixed with NEXT_PUBLIC_
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseUrl = config.supabase.url;
+const supabaseAnonKey = config.supabase.anonKey;
+
+console.log('🔧 Supabase client initialization:', {
+  url: supabaseUrl ? '✅ Set' : '❌ Missing',
+  anonKey: supabaseAnonKey ? '✅ Set' : '❌ Missing',
+  urlLength: supabaseUrl?.length || 0,
+  anonKeyLength: supabaseAnonKey?.length || 0,
+  isClient: typeof window !== 'undefined',
+  configUrl: config.supabase.url ? '✅ Set' : '❌ Missing',
+  configAnonKey: config.supabase.anonKey ? '✅ Set' : '❌ Missing',
+});
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables. Please check your .env.local file.');
+  console.error('❌ Missing Supabase environment variables. Please check your .env.local file.');
+  console.error('URL:', supabaseUrl);
+  console.error('Anon Key:', supabaseAnonKey ? 'Present' : 'Missing');
+  console.error('Config URL:', config.supabase.url);
+  console.error('Config Anon Key:', config.supabase.anonKey ? 'Present' : 'Missing');
 }
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 
+// Test the Supabase client immediately
+console.log('🔧 Testing Supabase client...');
+supabase.auth.getSession().then(({ data, error }) => {
+  if (error) {
+    console.error('❌ Supabase client test failed:', error);
+  } else {
+    console.log('✅ Supabase client test successful');
+  }
+}).catch(error => {
+  console.error('❌ Supabase client test exception:', error);
+});
+
 // Helper function to get the current user
 export const getCurrentUser = async () => {
-  const { data: { session }, error } = await supabase.auth.getSession();
+  console.log('🔍 getCurrentUser called');
   
-  if (error) {
-    console.error('Error getting session:', error);
-    return null;
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      console.error('❌ Error getting session:', error);
+      return null;
+    }
+    
+    console.log('📋 Session check result:', session ? 'Session found' : 'No session');
+    
+    if (!session) {
+      return null;
+    }
+    
+    // Add email as the primary identifier
+    return {
+      ...session.user,
+      primaryId: session.user.email // Use email as the primary ID
+    };
+  } catch (error) {
+    console.error('❌ Exception in getCurrentUser:', error);
+    throw error;
   }
-  
-  if (!session) {
-    return null;
-  }
-  
-  // Add email as the primary identifier
-  return {
-    ...session.user,
-    primaryId: session.user.email // Use email as the primary ID
-  };
 };
 
 // Helper function to get user settings

@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import Layout from "@/components/layout/Layout";
 
+
 export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -57,56 +58,67 @@ export default function Register() {
     }
     
     try {
-      // Sign up with Supabase
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/account`,
-          data: {
-            full_name: fullName,
-          }
+      // Create user using server-side API (no Supabase email confirmation)
+      const registrationResponse = await fetch('/api/create-user-without-confirmation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          email: email,
+          password: password,
+          fullName: fullName,
+        }),
       });
       
-      if (error) throw error;
+      if (!registrationResponse.ok) {
+        const errorData = await registrationResponse.json();
+        console.error('Registration failed:', errorData);
+        throw new Error(errorData.error || 'Registration failed');
+      }
       
-      if (data?.user) {
-        // Create user profile
-        const { error: profileError } = await supabase
-          .from('user_profiles')
-          .insert({
-            user_id: data.user.id,
-            full_name: fullName,
-            email: email,
-          });
-          
-        if (profileError) {
-          console.error('Error creating user profile:', profileError);
-        }
+      const result = await registrationResponse.json();
+      console.log('User and profile created successfully:', result);
 
-        // Create default bankroll
-        const { error: bankrollError } = await supabase
-          .from('bankrolls')
-          .insert({
-            user_id: data.user.id,
-            name: 'Default Bankroll',
-            description: 'Your default bankroll for tracking bets',
-            initial_amount: 1000,
-            current_amount: 1000,
-            currency: 'GBP',
-            is_active: true
-          });
-          
-        if (bankrollError) {
-          console.error('Error creating default bankroll:', bankrollError);
+      // Sign the user in after creating them
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
+
+      if (signInError) {
+        console.error('Error signing in user:', signInError);
+      } else {
+        console.log('User signed in successfully:', signInData.user?.id);
+      }
+
+      // Send welcome email from our business email
+      try {
+        const emailResponse = await fetch('/api/send-welcome-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: email,
+            fullName: fullName,
+          }),
+        });
+        
+        if (emailResponse.ok) {
+          console.log('Welcome email sent successfully');
+        } else {
+          console.error('Failed to send welcome email');
         }
+      } catch (emailError) {
+        console.error('Error sending welcome email:', emailError);
+        // Don't fail registration if email fails
       }
       
       // Success
       toast({
         title: "Registration successful!",
-        description: "Please check your email to verify your account.",
+        description: "Welcome to OddsVantage! Choose your membership tier.",
       });
       
       // Clear form
@@ -116,9 +128,9 @@ export default function Register() {
       setFullName("");
       setAgreeToTerms(false);
       
-      // Redirect to login
+      // Redirect to membership page
       setTimeout(() => {
-        router.push("/login");
+        router.push("/membership");
       }, 2000);
       
     } catch (error: any) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API_USERNAME = 'KQ9W7rQeAHWMUgxH93ie3yEc';
-const API_PASSWORD = 'T5BoPivL3Q2h6RhCdLv4EwZu';
+const API_USERNAME = process.env.RACING_API_USERNAME || 'KQ9W7rQeAHWMUgxH93ie3yEc';
+const API_PASSWORD = process.env.RACING_API_PASSWORD || 'T5BoPivL3Q2h6RhCdLv4EwZu';
 const BASE_URL = 'https://api.theracingapi.com/v1';
 
 /**
@@ -10,16 +10,17 @@ const BASE_URL = 'https://api.theracingapi.com/v1';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
+  const { path } = await params;
   try {
     // Get the path from the URL
-    const path = params.path.join('/');
+    const pathString = path.join('/');
     
     // Create full URL including search params
     const { searchParams } = new URL(request.url);
     const queryString = searchParams.toString();
-    const url = `${BASE_URL}/${path}${queryString ? `?${queryString}` : ''}`;
+    const url = `${BASE_URL}/${pathString}${queryString ? `?${queryString}` : ''}`;
     
     // Log the request
     console.log(`Server proxy making request to: ${url}`);

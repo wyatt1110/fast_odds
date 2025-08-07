@@ -340,7 +340,7 @@ export default function HorseRacingReturnsPage() {
           
           breakdown.push({
             type: betTypeName,
-            horses: combination.map(h => h.name),
+            horses: combination.map((h: any) => h.name),
             stake: baseStake * eachWayMultiplier,
             returns: returns,
             profit: returns - (baseStake * eachWayMultiplier)

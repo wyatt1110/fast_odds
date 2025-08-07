@@ -441,7 +441,7 @@ export default function AllBetsPage() {
         <BetForm 
           isOpen={isFormOpen} 
           onClose={handleCloseForm} 
-          userId={userId} 
+          userId={userId || ''} 
           onBetSaved={handleBetSaved}
         />
       )}

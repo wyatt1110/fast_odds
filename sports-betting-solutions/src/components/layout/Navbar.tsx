@@ -116,15 +116,19 @@ const Navbar = () => {
               <div className={`absolute left-0 mt-2 w-56 bg-betting-dark border border-betting-green/20 rounded-md shadow-lg z-50 ${racingDropdownOpen ? 'opacity-100 visible' : 'opacity-0 invisible'} transition-all duration-200`}
                    onMouseEnter={() => setRacingDropdownOpen(true)}
                    onMouseLeave={() => setRacingDropdownOpen(false)}>
-                <Link href="/horse-racing" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Home</Link>
-                <Link href="/horse-racing/news" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Racing News</Link>
                 <Link href="/horse-racing/racecards" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Racecards</Link>
                 <Link href="/horse-racing/data" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Free Racing Data</Link>
-                <Link href="/horse-racing/tools" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Premium Tools</Link>
+                <Link href="/turf-tracker" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Turf Tracker</Link>
+                <Link href="/horse-racing/pro-dashboard" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Pro Dashboard</Link>
+                <Link href="/horse-racing/ov-models" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">OV Models</Link>
               </div>
             </div>
 
-            {/* Betting Tools Dropdown */}
+            <Link href="/football" className="text-white hover:text-betting-green transition">
+              <span>Football</span>
+            </Link>
+
+            {/* Betting Calculators Dropdown */}
             <div className="relative group">
               <button 
                 className="flex items-center space-x-1 text-white hover:text-betting-green transition"
@@ -132,7 +136,7 @@ const Navbar = () => {
                 onMouseEnter={() => setToolsOpen(true)}
                 onMouseLeave={() => setToolsOpen(false)}
               >
-                <span>Betting Tools</span>
+                <span>Betting Calculators</span>
                 <ChevronDown size={16} />
               </button>
               
@@ -143,15 +147,11 @@ const Navbar = () => {
                 <Link href="/tools/horse-racing-returns" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Horse Racing Returns</Link>
                 <Link href="/tools/draw-no-bet" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Draw No Bet Calculator</Link>
                 <Link href="/tools/double-chance" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Double Chance Calculator</Link>
-                {user && (
-                  <Link href="/turf-tracker" className="block px-4 py-2 font-semibold text-betting-green hover:bg-betting-green/10 transition">Turf Tracker (Premium)</Link>
-                )}
+                <Link href="/tools/vig-calculator" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Vig Calculator</Link>
+                <Link href="/tools/kelly-criterion" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Kelly Criterion Calculator</Link>
+                <Link href="/tools/poisson-calculator" className="block px-4 py-2 text-white hover:bg-betting-green/10 transition">Poisson Probability Calculator</Link>
               </div>
             </div>
-
-            <Link href="/football" className="text-white hover:text-betting-green transition">
-              <span>Football</span>
-            </Link>
 
             <Link href="/leaderboards" className="text-white hover:text-betting-green transition">
               <span>Leaderboards</span>
@@ -214,12 +214,12 @@ const Navbar = () => {
                 <span>Horse Racing</span>
               </Link>
               
-              <Link href="/tools/matched-betting" className="text-white hover:text-betting-green transition" onClick={() => setMobileMenuOpen(false)}>
-                <span>Betting Tools</span>
-              </Link>
-              
               <Link href="/football" className="text-white hover:text-betting-green transition" onClick={() => setMobileMenuOpen(false)}>
                 <span>Football</span>
+              </Link>
+              
+              <Link href="/tools/matched-betting" className="text-white hover:text-betting-green transition" onClick={() => setMobileMenuOpen(false)}>
+                <span>Betting Calculators</span>
               </Link>
               
               <Link href="/leaderboards" className="text-white hover:text-betting-green transition" onClick={() => setMobileMenuOpen(false)}>
@@ -227,9 +227,17 @@ const Navbar = () => {
               </Link>
 
               {user && (
-                <Link href="/turf-tracker" className="text-betting-green font-semibold hover:text-betting-secondary transition" onClick={() => setMobileMenuOpen(false)}>
-                  <span>Turf Tracker</span>
-                </Link>
+                <>
+                  <Link href="/turf-tracker" className="text-betting-green font-semibold hover:text-betting-secondary transition" onClick={() => setMobileMenuOpen(false)}>
+                    <span>Turf Tracker</span>
+                  </Link>
+                  <Link href="/horse-racing/pro-dashboard" className="text-betting-green font-semibold hover:text-betting-secondary transition" onClick={() => setMobileMenuOpen(false)}>
+                    <span>Pro Dashboard</span>
+                  </Link>
+                  <Link href="/horse-racing/ov-models" className="text-betting-green font-semibold hover:text-betting-secondary transition" onClick={() => setMobileMenuOpen(false)}>
+                    <span>OV Models</span>
+                  </Link>
+                </>
               )}
             </div>
           </div>

@@ -2,9 +2,11 @@ import { NextResponse, NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthenticatedUser } from '@/lib/auth/auth-utils';
 
+import { config } from '@/lib/config';
+
 // Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabaseUrl = config.supabase.url;
+const supabaseServiceKey = config.supabase.serviceKey;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 /**

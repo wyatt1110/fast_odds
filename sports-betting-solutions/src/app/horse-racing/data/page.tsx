@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from "next/link";
 import { ArrowLeft, Search, Loader2, User, Trophy, Zap } from "lucide-react";
 import Layout from "@/components/layout/Layout";
+import PageProtection from "@/components/auth/PageProtection";
 
 type SearchType = 'horse' | 'jockey' | 'trainer' | 'owner' | 'sire' | 'dam' | 'damsire';
 
@@ -840,7 +841,12 @@ export default function HorseRacingData() {
 
   return (
     <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <PageProtection
+        requiredAuth={true}
+        redirectTo="/login"
+        notificationMessage="You need to be logged in to access Racing Data"
+      >
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-20">
           <div className="w-full h-full bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.15)_0%,transparent_50%)] bg-[length:40px_40px]"></div>
@@ -1534,6 +1540,7 @@ export default function HorseRacingData() {
           )}
         </div>
       </div>
+      </PageProtection>
     </Layout>
   );
 } 

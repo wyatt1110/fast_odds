@@ -214,7 +214,7 @@ export default function BetSpreadsheet({ userId, showPendingOnly = false, onBetU
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setEditValues(prev => ({
+    setEditValues((prev: any) => ({
       ...prev,
       [name]: name === 'stake' || name === 'odds' || name === 'winnings' 
         ? parseFloat(value) || 0 
@@ -234,7 +234,8 @@ export default function BetSpreadsheet({ userId, showPendingOnly = false, onBetU
         
       if (error) throw error;
       
-      fetchBets();
+      const updatedBets = await getUserBets(userId, selectedBankroll || undefined);
+      setBets(updatedBets);
       if (onBetUpdated) onBetUpdated();
       setEditingBet(null);
     } catch (error) {
@@ -254,7 +255,8 @@ export default function BetSpreadsheet({ userId, showPendingOnly = false, onBetU
         
       if (error) throw error;
       
-      fetchBets();
+      const updatedBets = await getUserBets(userId, selectedBankroll || undefined);
+      setBets(updatedBets);
       if (onBetUpdated) onBetUpdated();
     } catch (error) {
       console.error('Error deleting bet:', error);

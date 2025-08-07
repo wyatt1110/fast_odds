@@ -253,6 +253,18 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
     console.log('Opening form to add new bet');
   };
 
+  const handleSaveBet = async () => {
+    try {
+      // This would typically update the bet in the database
+      console.log('Saving bet');
+      // For now, just close the modal
+      setIsModalOpen(false);
+      // You could add actual save logic here
+    } catch (error) {
+      console.error('Error saving bet:', error);
+    }
+  };
+
   return (
     <div className={`p-4 ${getCardBg()} rounded-lg shadow`}>
       <h1 className={`text-xl font-bold ${getTextColor()} mb-4`}>All Bets</h1>
@@ -292,10 +304,10 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
               Status
             </label>
             <select
-              value={activeFilters.fields.status as string || 'all'}
+              value={Array.isArray(activeFilters.fields.status) ? activeFilters.fields.status[0] || 'all' : (activeFilters.fields.status as string | undefined) || 'all'}
               onChange={(e) => handleFilterChange({
                 ...activeFilters,
-                fields: { ...activeFilters.fields, status: e.target.value === 'all' ? undefined : e.target.value as string }
+                fields: { ...activeFilters.fields, status: e.target.value === 'all' ? undefined : [e.target.value] }
               })}
               className={`w-full ${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
             >
@@ -311,10 +323,10 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
               Bet Type
             </label>
             <select
-              value={activeFilters.fields.bet_type as string || 'all'}
+              value={(activeFilters.fields.bet_type as string | undefined) || 'all'}
               onChange={(e) => handleFilterChange({
                 ...activeFilters,
-                fields: { ...activeFilters.fields, bet_type: e.target.value === 'all' ? undefined : e.target.value as string }
+                fields: { ...activeFilters.fields, bet_type: e.target.value === 'all' ? undefined : [e.target.value] }
               })}
               className={`w-full ${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
             >
@@ -339,10 +351,10 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
             </label>
             <input
               type="text"
-              value={activeFilters.fields.bookmaker as string || ''}
+              value={(activeFilters.fields.bookmaker as string | undefined) || ''}
               onChange={(e) => handleFilterChange({
                 ...activeFilters,
-                fields: { ...activeFilters.fields, bookmaker: e.target.value }
+                fields: { ...activeFilters.fields, bookmaker: e.target.value ? [e.target.value] : undefined }
               })}
               placeholder="Any bookmaker"
               className={`w-full ${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -355,10 +367,10 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
             </label>
             <input
               type="text"
-              value={activeFilters.fields.model as string || ''}
+              value={(activeFilters.fields.model as string | undefined) || ''}
               onChange={(e) => handleFilterChange({
                 ...activeFilters,
-                fields: { ...activeFilters.fields, model: e.target.value }
+                fields: { ...activeFilters.fields, model: e.target.value ? [e.target.value] : undefined }
               })}
               placeholder="Any model"
               className={`w-full ${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -371,10 +383,10 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
             </label>
             <input
               type="text"
-              value={activeFilters.fields.track_name as string || ''}
+              value={(activeFilters.fields.track_name as string | undefined) || ''}
               onChange={(e) => handleFilterChange({
                 ...activeFilters,
-                fields: { ...activeFilters.fields, track_name: e.target.value }
+                fields: { ...activeFilters.fields, track_name: e.target.value ? [e.target.value] : undefined }
               })}
               placeholder="Any track"
               className={`w-full ${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -387,10 +399,10 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
             </label>
             <input
               type="text"
-              value={activeFilters.fields.horse_name as string || ''}
+              value={(activeFilters.fields.horse_name as string | undefined) || ''}
               onChange={(e) => handleFilterChange({
                 ...activeFilters,
-                fields: { ...activeFilters.fields, horse_name: e.target.value }
+                fields: { ...activeFilters.fields, horse_name: e.target.value ? [e.target.value] : undefined }
               })}
               placeholder="Any horse"
               className={`w-full ${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -407,7 +419,7 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
                 value={activeFilters.ranges.stake?.min || ''}
                 onChange={(e) => handleFilterChange({
                   ...activeFilters,
-                  ranges: { ...activeFilters.ranges, stake: { ...activeFilters.ranges.stake, min: e.target.value ? parseFloat(e.target.value) : null } }
+                  ranges: { ...activeFilters.ranges, stake: { ...activeFilters.ranges.stake, min: e.target.value ? parseFloat(e.target.value) : null, max: activeFilters.ranges.stake?.max || null } }
                 })}
                 className={`${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1`}
               />
@@ -417,7 +429,7 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
                 value={activeFilters.ranges.stake?.max || ''}
                 onChange={(e) => handleFilterChange({
                   ...activeFilters,
-                  ranges: { ...activeFilters.ranges, stake: { ...activeFilters.ranges.stake, max: e.target.value ? parseFloat(e.target.value) : null } }
+                  ranges: { ...activeFilters.ranges, stake: { ...activeFilters.ranges.stake, max: e.target.value ? parseFloat(e.target.value) : null, min: activeFilters.ranges.stake?.min || null } }
                 })}
                 className={`${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1`}
               />
@@ -434,7 +446,7 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
                 value={activeFilters.ranges.odds?.min || ''}
                 onChange={(e) => handleFilterChange({
                   ...activeFilters,
-                  ranges: { ...activeFilters.ranges, odds: { ...activeFilters.ranges.odds, min: e.target.value ? parseFloat(e.target.value) : null } }
+                  ranges: { ...activeFilters.ranges, odds: { ...activeFilters.ranges.odds, min: e.target.value ? parseFloat(e.target.value) : null, max: activeFilters.ranges.odds?.max || null } }
                 })}
                 className={`${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1`}
               />
@@ -444,7 +456,7 @@ export default function SettledBetsPage({ userId }: { userId: string }) {
                 value={activeFilters.ranges.odds?.max || ''}
                 onChange={(e) => handleFilterChange({
                   ...activeFilters,
-                  ranges: { ...activeFilters.ranges, odds: { ...activeFilters.ranges.odds, max: e.target.value ? parseFloat(e.target.value) : null } }
+                  ranges: { ...activeFilters.ranges, odds: { ...activeFilters.ranges.odds, max: e.target.value ? parseFloat(e.target.value) : null, min: activeFilters.ranges.odds?.min || null } }
                 })}
                 className={`${getInputBg()} ${getInputTextColor()} px-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1`}
               />

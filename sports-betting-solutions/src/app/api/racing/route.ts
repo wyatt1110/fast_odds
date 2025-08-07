@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const API_USERNAME = 'KQ9W7rQeAHWMUgxH93ie3yEc';
-const API_PASSWORD = 'T5BoPivL3Q2h6RhCdLv4EwZu';
+const API_USERNAME = process.env.RACING_API_USERNAME || 'KQ9W7rQeAHWMUgxH93ie3yEc';
+const API_PASSWORD = process.env.RACING_API_PASSWORD || 'T5BoPivL3Q2h6RhCdLv4EwZu';
 const BASE_URL = 'https://api.theracingapi.com/v1';
 
 /**

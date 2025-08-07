@@ -144,9 +144,6 @@ export default function Footer() {
               © {currentYear} OddsVantage. All rights reserved.
             </p>
             <div className="mt-4 md:mt-0">
-              <p className="text-gray-400 text-sm">
-                Designed with ♥ for sports bettors worldwide
-              </p>
             </div>
           </div>
         </div>

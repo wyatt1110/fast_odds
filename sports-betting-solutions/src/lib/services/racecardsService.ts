@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 
 // Import Json type from Supabase
 type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
@@ -37,6 +37,8 @@ export interface Race {
   betting_forecast: string | null;
   created_at: string | null;
   updated_at: string | null;
+  draw_bias?: string | null;
+  pace_forecast?: string | null;
 }
 
 export interface Runner {
@@ -94,6 +96,15 @@ export interface Runner {
   medical: Json | null;
   created_at: string | null;
   updated_at: string | null;
+  pacemap_1?: string | null;
+  pacemap_2?: string | null;
+  past_performance_1?: string | null;
+  past_performance_2?: string | null;
+  past_performance_3?: string | null;
+  past_performance_4?: string | null;
+  past_performance_5?: string | null;
+  past_performance_6?: string | null;
+  timeform?: any;
 }
 
 export interface TrackData {
@@ -201,26 +212,74 @@ const formatPrizeMoney = (prize: string | null): string => {
   return prize;
 };
 
-// Fetch today's races from Supabase (UK date-based)
+// Get race timeform analysis data
+export const getRaceTimeformAnalysis = async (raceId: string): Promise<any> => {
+  console.log(`Fetching timeform analysis for race ID: ${raceId}`);
+
+  const { data, error } = await supabase
+    .from('timeform' as any)
+    .select('draw_bias, pace_forecast')
+    .eq('race_id', raceId)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') { // No rows found
+      console.log(`No timeform analysis found for race ID: ${raceId}`);
+      return null;
+    }
+    console.error(`Error fetching timeform analysis for race ID ${raceId}:`, error);
+    // For debugging, returning partial data even on error if some data exists (though typically you'd re-throw)
+    return data; // Return data even if there's an error, for inspection if data partial
+  }
+
+  console.log(`Timeform analysis data for race ID ${raceId}:`, data);
+  return data;
+};
+
+// Fetch today's races from Supabase with timeform data (UK date-based)
 export const getTodaysRaces = async (): Promise<Race[]> => {
   const currentUKDate = getCurrentUKRaceDate();
   
-  console.log(`Fetching races for UK date: ${currentUKDate}`);
+  console.log(`🔍 getTodaysRaces: Fetching races for UK date: ${currentUKDate}`);
+  console.log(`🔍 getTodaysRaces: Supabase client available:`, !!supabase);
   
-  const { data, error } = await supabase
-    .from('races')
-    .select('*')
-    .eq('race_date', currentUKDate)
-    .eq('is_abandoned', false)
-    .order('off_dt', { ascending: true });
-  
-  if (error) {
-    console.error('Error fetching races:', error);
-    throw new Error('Failed to fetch races');
+  try {
+    const { data: racesData, error: racesError } = await supabase
+      .from('races')
+      .select('*')
+      .eq('race_date', currentUKDate)
+      .eq('is_abandoned', false)
+      .order('off_dt', { ascending: true });
+    
+    console.log(`🔍 getTodaysRaces: Query completed`);
+    console.log(`🔍 getTodaysRaces: Error:`, racesError);
+    console.log(`🔍 getTodaysRaces: Data count:`, racesData?.length || 0);
+    
+    if (racesError) {
+      console.error('❌ getTodaysRaces: Error fetching races:', racesError);
+      throw new Error(`Failed to fetch races: ${racesError.message}`);
+    }
+    
+    console.log(`✅ getTodaysRaces: Found ${racesData?.length || 0} races for ${currentUKDate}`);
+    
+    if (!racesData) return [];
+
+    // Fetch timeform data for each race and merge
+    const racesWithTimeform = await Promise.all(racesData.map(async (race) => {
+      const timeformAnalysis = await getRaceTimeformAnalysis(race.race_id);
+      return {
+        ...race,
+        draw_bias: timeformAnalysis?.draw_bias || null,
+        pace_forecast: timeformAnalysis?.pace_forecast || null,
+      };
+    }));
+    
+    console.log(`✅ getTodaysRaces: Returning ${racesWithTimeform.length} races with timeform data`);
+    return racesWithTimeform;
+  } catch (error) {
+    console.error('❌ getTodaysRaces: Exception caught:', error);
+    throw error;
   }
-  
-  console.log(`Found ${data?.length || 0} races for ${currentUKDate}`);
-  return data || [];
 };
 
 // Get runner count for a specific race (only for today's races)
@@ -302,11 +361,16 @@ export const getMultipleRaceRunnerCounts = async (raceIds: string[]): Promise<Re
 
 // Transform races into track-grouped format (UK date-based)
 export const getTrackGroupedRaces = async (): Promise<TrackData[]> => {
-  const races = await getTodaysRaces();
+  console.log('🔍 getTrackGroupedRaces: Starting...');
   
-  if (races.length === 0) {
-    return [];
-  }
+  try {
+    const races = await getTodaysRaces();
+    console.log(`🔍 getTrackGroupedRaces: Got ${races.length} races from getTodaysRaces`);
+    
+    if (races.length === 0) {
+      console.log('🔍 getTrackGroupedRaces: No races found, returning empty array');
+      return [];
+    }
   
   // Get runner counts for all races
   const raceIds = races.map(race => race.race_id);
@@ -356,7 +420,12 @@ export const getTrackGroupedRaces = async (): Promise<TrackData[]> => {
   // Sort tracks alphabetically
   tracks.sort((a, b) => a.name.localeCompare(b.name));
   
+  console.log(`✅ getTrackGroupedRaces: Returning ${tracks.length} tracks`);
   return tracks;
+  } catch (error) {
+    console.error('❌ getTrackGroupedRaces: Exception caught:', error);
+    throw error;
+  }
 };
 
 // Calculate racecards statistics (UK date-based)
@@ -388,27 +457,67 @@ export const getRacecardsStats = async (): Promise<RacecardsStats> => {
   };
 };
 
-// Get runners for a specific race (allow any date for debugging)
+// Get runners for a specific race (simplified - no timeform data)
 export const getRaceRunners = async (raceId: string): Promise<Runner[]> => {
   console.log(`Fetching runners for race ID: ${raceId}`);
   
-  const { data, error } = await supabase
+  const { data: runnersData, error: runnersError } = await supabase
     .from('runners')
     .select('*')
     .eq('race_id', raceId)
     .order('number', { ascending: true });
   
-  if (error) {
-    console.error('Error fetching race runners:', error);
+  if (runnersError) {
+    console.error('Error fetching race runners:', runnersError);
     throw new Error('Failed to fetch race runners');
   }
   
-  console.log(`Found ${data?.length || 0} runners for race ${raceId}`);
-  if (data && data.length > 0) {
-    console.log('Sample runner:', data[0]);
+  console.log(`Found ${runnersData?.length || 0} runners for race ${raceId}`);
+  
+  if (!runnersData || runnersData.length === 0) {
+    return [];
   }
   
-  return data || [];
+  // Fetch timeform data for each runner
+  const runnersWithTimeform = await Promise.all(runnersData.map(async (runner: any) => {
+    try {
+      const { data: timeformData, error: timeformError } = await supabase
+        .from('timeform')
+        .select('*')
+        .eq('race_id', raceId)
+        .eq('horse_id', runner.horse_id)
+        .single();
+      
+      if (timeformError && timeformError.code !== 'PGRST116') {
+        console.error(`Error fetching timeform data for horse ${runner.horse_id}:`, timeformError);
+      }
+      
+      // Debug: Log timeform data if found
+      if (timeformData) {
+        console.log(`Found timeform data for horse ${runner.horse_name} (${runner.horse_id}):`, {
+          race_id: timeformData.race_id,
+          horse_id: timeformData.horse_id,
+          has_past_performances: !!timeformData.pp_1_date,
+          sample_track: timeformData.pp_1_track
+        });
+      } else {
+        console.log(`No timeform data found for horse ${runner.horse_name} (${runner.horse_id})`);
+      }
+      
+      return {
+        ...runner,
+        timeform: timeformData || null
+      };
+    } catch (error) {
+      console.error(`Error processing timeform data for horse ${runner.horse_id}:`, error);
+      return {
+        ...runner,
+        timeform: null
+      };
+    }
+  }));
+  
+  return runnersWithTimeform;
 };
 
 // Get odds for a specific race (allow any date for debugging)
